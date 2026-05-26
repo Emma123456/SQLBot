@@ -605,6 +605,20 @@
     "set": "设置",
     "operate_with_caution": "删除后，该工作空间下的用户将被移除，所有资源也将被删除，请谨慎操作。"
   },
+  "role": {
+    "management": "角色管理",
+    "create": "新建角色",
+    "edit": "编辑角色",
+    "delete": "删除角色",
+    "name": "角色名称",
+    "code": "角色编码",
+    "description": "描述",
+    "users": "用户",
+    "manageUsers": "管理用户",
+    "search_placeholder": "搜索角色名称或编码",
+    "delete_confirm": "确定删除角色 \"{name}\" 吗？删除后关联用户的角色分配也将移除。",
+    "remove_user_confirm": "确定将用户 \"{name}\" 从该角色移除吗？"
+  },
   "department": {
     "management": "部门管理",
     "create": "新建部门",

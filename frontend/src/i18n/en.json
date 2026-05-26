@@ -620,6 +620,20 @@
     "delete_confirm": "Are you sure to delete department \"{name}\"?",
     "remove_user_confirm": "Are you sure to remove user \"{name}\" from this department?"
   },
+  "role": {
+    "management": "Role Management",
+    "create": "Create Role",
+    "edit": "Edit Role",
+    "delete": "Delete Role",
+    "name": "Role Name",
+    "code": "Role Code",
+    "description": "Description",
+    "users": "Users",
+    "manageUsers": "Manage Users",
+    "search_placeholder": "Search role name or code",
+    "delete_confirm": "Are you sure to delete role \"{name}\"? User assignments will also be removed.",
+    "remove_user_confirm": "Are you sure to remove user \"{name}\" from this role?"
+  },
   "permission": {
     "search_field": "Search field",
     "search_rule_group": "Search rule group",

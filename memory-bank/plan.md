@@ -597,13 +597,26 @@
 ---
 
 **第三阶段验收检查点 — 角色端到端测试**：
-- [ ] 后端 `GET /api/role` 返回角色列表
-- [ ] 后端 CRUD 操作均正常
-- [ ] 分配/移除用户到角色后 `sys_user.role_ids` 正确刷新
-- [ ] 删除角色后关联记录清除、冗余字段刷新
-- [ ] 前端角色管理页面可正常访问和操作
-- [ ] 前端用户分配抽屉正常工作
-- [ ] 前端调用后端 API 无报错
+- [x] 后端 `GET /api/role` 返回角色列表
+- [x] 后端 CRUD 操作均正常
+- [x] 分配/移除用户到角色后 `sys_user.role_ids` 正确刷新
+- [x] 删除角色后关联记录清除、冗余字段刷新
+- [x] 前端角色管理页面可正常访问和操作
+- [x] 前端用户分配抽屉正常工作
+- [x] 前端调用后端 API 无报错
+
+> **Phase 3 Status**: ✅ COMPLETED & TESTED (2026-05-26)
+> - Role CRUD logic with pagination, keyword search, name/code uniqueness checks
+> - Role REST API with 9 endpoints under /system/role, admin-only protection
+> - Delete role also removes user associations and refreshes role_ids
+> - Router registered in api.py
+> - Frontend API client (role.ts) with typed interfaces
+> - Role management page with el-table, search, pagination, create/edit dialog, user drawer
+> - Route added to frontend router (/system/role)
+> - i18n translations added (zh-CN, en, zh-TW) — 13 keys each
+> - E2E browser tested: Create, Edit, Manage Users, Delete all working
+> - Zero TypeScript compilation errors
+> - Ready for Phase 4
 
 ---
 
