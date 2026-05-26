@@ -74,10 +74,6 @@ const computedWidth = computed(() => {
   }
 })
 
-const operators = computed(() => {
-  return allOptions
-})
-
 // The currently selected variable object
 const selectedVariable = computed(() => {
   if (item.value.value_type !== 'variable' || !item.value.variable_id) return null

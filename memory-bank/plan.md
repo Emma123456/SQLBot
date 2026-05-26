@@ -422,14 +422,29 @@
 ---
 
 **第二阶段验收检查点 — 部门端到端测试**：
-- [ ] 后端 `GET /api/department/tree` 返回正确树形结构
-- [ ] 后端 CRUD 操作（创建、读取、更新、删除）均正常
-- [ ] 删除有子部门的部门返回 400 错误
-- [ ] 分配/移除用户到部门后 `sys_user.dept_ids` 正确刷新
-- [ ] 前端部门管理页面可正常访问和操作
-- [ ] 前端树形组件正确显示层级
-- [ ] 前端用户分配抽屉正常工作
-- [ ] 前端调用后端 API 无报错
+- [x] 后端 `GET /api/department/tree` 返回正确树形结构
+- [x] 后端 CRUD 操作（创建、读取、更新、删除）均正常
+- [x] 删除有子部门的部门返回 400 错误
+- [x] 分配/移除用户到部门后 `sys_user.dept_ids` 正确刷新
+- [x] 前端部门管理页面可正常访问和操作
+- [x] 前端树形组件正确显示层级
+- [x] 前端用户分配抽屉正常工作
+- [x] 前端调用后端 API 无报错
+
+> **Phase 2 Status**: ✅ COMPLETED & TESTED (2026-05-26)
+> - Department CRUD logic implemented with tree building
+> - Department REST API with admin-only protection
+> - Router registered in api.py
+> - Frontend API client created
+> - Department management page with el-tree, create/edit dialog, user management drawer
+> - Route added to frontend router
+> - i18n translations added (zh-CN, en, zh-TW)
+> - Tree building verified with multi-level test
+> - E2E browser tested: Create, Edit, Delete, Manage Users all working
+> - Fixed ElMessage/ElMessageBox import bug (was using window fallback, now imports from element-plus-secondary)
+> - Fixed FilterFiled.vue unused operators variable
+> - Zero TypeScript compilation errors
+> - Ready for Phase 3
 
 ---
 

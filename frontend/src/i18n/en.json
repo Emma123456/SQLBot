@@ -605,6 +605,21 @@
     "set": "Settings",
     "operate_with_caution": "After deletion, the users under the workspace will be removed and all resources will be deleted. Please operate with caution."
   },
+  "department": {
+    "management": "Department Management",
+    "create": "Create Department",
+    "edit": "Edit Department",
+    "delete": "Delete Department",
+    "name": "Department Name",
+    "code": "Department Code",
+    "parent": "Parent Department",
+    "root": "Root Department",
+    "manageUsers": "Manage Users",
+    "is_primary": "Primary",
+    "no_departments": "No departments yet",
+    "delete_confirm": "Are you sure to delete department \"{name}\"?",
+    "remove_user_confirm": "Are you sure to remove user \"{name}\" from this department?"
+  },
   "permission": {
     "search_field": "Search field",
     "search_rule_group": "Search rule group",

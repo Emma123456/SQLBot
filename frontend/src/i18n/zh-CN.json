@@ -605,6 +605,21 @@
     "set": "设置",
     "operate_with_caution": "删除后，该工作空间下的用户将被移除，所有资源也将被删除，请谨慎操作。"
   },
+  "department": {
+    "management": "部门管理",
+    "create": "新建部门",
+    "edit": "编辑部门",
+    "delete": "删除部门",
+    "name": "部门名称",
+    "code": "部门编码",
+    "parent": "父部门",
+    "root": "根部门",
+    "manageUsers": "管理用户",
+    "is_primary": "主部门",
+    "no_departments": "暂无部门",
+    "delete_confirm": "确定删除部门 \"{name}\" 吗？",
+    "remove_user_confirm": "确定将用户 \"{name}\" 从该部门移除吗？"
+  },
   "permission": {
     "search_field": "搜索字段",
     "search_rule_group": "搜索规则组",

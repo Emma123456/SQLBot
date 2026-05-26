@@ -28,6 +28,7 @@ import Parameter from '@/views/system/parameter/index.vue'
 import Authentication from '@/views/system/authentication/index.vue'
 import Platform from '@/views/system/platform/index.vue'
 import Permission from '@/views/system/permission/index.vue'
+import Department from '@/views/system/department/index.vue'
 import User from '@/views/system/user/User.vue'
 import Workspace from '@/views/system/workspace/index.vue'
 import Page401 from '@/views/error/index.vue'
@@ -171,6 +172,12 @@ export const routes = [
         name: 'user',
         component: User,
         meta: { title: t('user.user_management'), iconActive: 'user', iconDeActive: 'noUser' },
+      },
+      {
+        path: 'department',
+        name: 'department',
+        component: Department,
+        meta: { title: t('department.management'), iconActive: 'user', iconDeActive: 'noUser' },
       },
       {
         path: 'workspace',

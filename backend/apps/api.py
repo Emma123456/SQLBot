@@ -5,9 +5,8 @@ from apps.dashboard.api import dashboard_api
 from apps.data_training.api import data_training
 from apps.datasource.api import datasource, table_relation, recommended_problem
 from apps.mcp import mcp
-from apps.system.api import login, user, aimodel, workspace, assistant, parameter, apikey, variable_api
-# TODO: Import role and department routers after they are created
-# from apps.system.api.department import router as dept_router
+from apps.system.api import login, user, aimodel, workspace, assistant, parameter, apikey, variable_api, department
+# TODO: Import role router after it is created
 # from apps.system.api.role import router as role_router
 from apps.terminology.api import terminology
 from apps.settings.api import base
@@ -34,9 +33,9 @@ api_router.include_router(apikey.router)
 api_router.include_router(recommended_problem.router)
 
 api_router.include_router(variable_api.router)
+api_router.include_router(department.router)
 
-# TODO: Register role and department routers after they are created
-# api_router.include_router(dept_router, prefix="/api")
-# api_router.include_router(role_router, prefix="/api")
+# TODO: Register role router after it is created
+# api_router.include_router(role_router)
 
 #api_router.include_router(audit_api.router)

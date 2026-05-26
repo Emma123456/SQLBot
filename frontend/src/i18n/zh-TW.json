@@ -605,6 +605,21 @@
     "set": "設定",
     "operate_with_caution": "刪除後，該工作區下的使用者將被移除，所有資源也將被刪除，請謹慎操作。"
   },
+  "department": {
+    "management": "部門管理",
+    "create": "新建部門",
+    "edit": "編輯部門",
+    "delete": "刪除部門",
+    "name": "部門名稱",
+    "code": "部門編碼",
+    "parent": "父部門",
+    "root": "根部門",
+    "manageUsers": "管理使用者",
+    "is_primary": "主部門",
+    "no_departments": "暫無部門",
+    "delete_confirm": "確定刪除部門 \"{name}\" 嗎？",
+    "remove_user_confirm": "確定將使用者 \"{name}\" 從該部門移除嗎？"
+  },
   "permission": {
     "search_field": "搜尋欄位",
     "search_rule_group": "搜尋規則組",
