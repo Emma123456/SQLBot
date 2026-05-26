@@ -1,22 +1,46 @@
 <script lang="ts" setup>
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import delIcon from '@/assets/svg/icon_delete.svg'
 import icon_key_outlined from '@/assets/svg/icon-key_outlined.svg'
 import icon_member_outlined from '@/assets/svg/icon_member_outlined.svg'
 import Lock from '@/assets/permission/icon_custom-tools_colorful.svg'
-withDefaults(
+
+const { t } = useI18n()
+
+const props = withDefaults(
   defineProps<{
     name: string
-    type: string
-    num: string
+    type: number
+    num: number
     id?: string
+    roleCount?: number
+    deptCount?: number
   }>(),
   {
     name: '-',
-    type: '-',
+    type: 0,
     id: '-',
-    num: '-',
+    num: 0,
+    roleCount: 0,
+    deptCount: 0,
   }
 )
+
+const targetSummary = computed(() => {
+  const parts: string[] = []
+  const userCount = Number(props.type) || 0
+  if (userCount > 0) {
+    parts.push(t('permission.X_users', { msg: userCount }))
+  }
+  if (props.roleCount > 0) {
+    parts.push(t('permission.X_roles', { msg: props.roleCount }))
+  }
+  if (props.deptCount > 0) {
+    parts.push(t('permission.X_depts', { msg: props.deptCount }))
+  }
+  return parts.length > 0 ? parts.join(', ') : t('permission.not_assigned')
+})
 
 const emits = defineEmits(['edit', 'del', 'setUser', 'setRule'])
 
@@ -50,8 +74,10 @@ const setUser = () => {
       <span class="value"> {{ $t('permission.2', { msg: num }) }}</span>
     </div>
     <div class="type-value">
-      <span class="type">{{ $t('permission.restricted_user') }}</span>
-      <span class="value"> {{ $t('permission.238_people', { msg: type }) }}</span>
+      <span class="type">{{ $t('permission.restricted_target') }}</span>
+      <span class="value">
+        {{ targetSummary }}
+      </span>
     </div>
     <div class="methods">
       <el-button secondary @click="handleEdit">

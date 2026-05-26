@@ -11,8 +11,10 @@ import ICON_TABLE from '@/assets/svg/chart/icon_form_outlined.svg'
 import Card from './Card.vue'
 import { dsTypeWithImg } from '@/views/ds/js/ds-type'
 import SelectPermission from './SelectPermission.vue'
+import SelectRole from './SelectRole.vue'
+import SelectDepartment from './SelectDepartment.vue'
 import AuthTree from './auth-tree/RowAuth.vue'
-import { getList, savePermissions, delPermissions } from '@/api/permissions'
+import { getList, savePermissions, delPermissions, updateRuleTargets, getAllRuleTargets } from '@/api/permissions'
 import { datasourceApi } from '@/api/datasource'
 import { useI18n } from 'vue-i18n'
 import { cloneDeep } from 'lodash-es'
@@ -36,6 +38,8 @@ const defaultPermission = {
   name: '',
   permissions: [],
   users: [],
+  roles: [],
+  departments: [],
 }
 const currentPermission = reactive<any>(cloneDeep(defaultPermission))
 
@@ -54,6 +58,27 @@ const defaultForm = {
 }
 const columnForm = reactive(cloneDeep(defaultForm))
 const selectPermissionRef = ref()
+const selectRoleRef = ref()
+const selectDeptRef = ref()
+const activeTargetTab = ref('user')
+const ruleTargetsMap = ref<Record<string, { roles: string[]; departments: string[] }>>({})
+// Computed: map from permission_id to aggregated roles/departments (for Card display)
+const permissionTargetsMap = computed(() => {
+  const map: Record<string, { roles: string[]; departments: string[] }> = {}
+  for (const perm of ruleList.value) {
+    const roleSet = new Set<string>()
+    const deptSet = new Set<string>()
+    for (const rule of perm.permissions || []) {
+      const targets = ruleTargetsMap.value[String(rule.id)]
+      if (targets) {
+        targets.roles.forEach((r) => roleSet.add(String(r)))
+        targets.departments.forEach((d) => deptSet.add(String(d)))
+      }
+    }
+    map[String(perm.id)] = { roles: [...roleSet], departments: [...deptSet] }
+  }
+  return map
+})
 const tableListOptions = ref<any[]>([])
 const fieldListOptions = ref<any[]>([])
 const dsListOptions = ref<any[]>([])
@@ -79,7 +104,7 @@ const setDrawerTitle = () => {
     }
 
     if (editRule.value === 2) {
-      drawerTitle.value = t('permission.select_restricted_user')
+      drawerTitle.value = t('permission.select_restricted_target')
     }
   }
 }
@@ -301,6 +326,20 @@ const handleSearch = () => {
     .finally(() => {
       searchLoading.value = false
     })
+  // Also load all rule targets for Card display
+  getAllRuleTargets()
+    .then((res: any) => {
+      const map: Record<number, { roles: number[]; departments: number[] }> = {}
+      // API returns { rules: [...] } or array
+      const rules = Array.isArray(res) ? res : (res?.rules || [])
+      for (const item of rules) {
+        map[String(item.rule_id)] = { roles: item.roles || [], departments: item.departments || [] }
+      }
+      ruleTargetsMap.value = map
+    })
+    .catch(() => {
+      // Silently ignore - targets API is optional
+    })
 }
 handleSearch()
 const addHandler = () => {
@@ -365,9 +404,21 @@ const setUser = (row: any) => {
   isCreate.value = false
   Object.assign(currentPermission, cloneDeep(row))
   activeStep.value = 1
+  // Load rule targets aggregated from all rules in this permission group
+  const aggregated = permissionTargetsMap.value[String(row.id)]
+  if (aggregated) {
+    currentPermission.roles = aggregated.roles || []
+    currentPermission.departments = aggregated.departments || []
+  } else {
+    currentPermission.roles = []
+    currentPermission.departments = []
+  }
   ruleConfigvVisible.value = true
   nextTick(() => {
+    activeTargetTab.value = 'user'
     selectPermissionRef.value.open(row.users)
+    selectRoleRef.value.open(currentPermission.roles)
+    selectDeptRef.value.open(currentPermission.departments)
   })
 }
 
@@ -439,6 +490,8 @@ const saveHandler = () => {
 }
 const preview = () => {
   currentPermission.user = selectPermissionRef.value.checkTableList.map((ele: any) => ele.id)
+  currentPermission.roles = selectRoleRef.value.checkedTableList.map((ele: any) => ele.id)
+  currentPermission.departments = selectDeptRef.value.checkedTableList.map((ele: any) => ele.id)
   activeStep.value = 0
 }
 const next = () => {
@@ -446,14 +499,17 @@ const next = () => {
     if (res) {
       activeStep.value = 1
       nextTick(() => {
+        activeTargetTab.value = 'user'
         selectPermissionRef.value.open(currentPermission.users)
+        selectRoleRef.value.open(currentPermission.roles || [])
+        selectDeptRef.value.open(currentPermission.departments || [])
       })
     }
   })
 }
 const saveLoading = ref(false)
-const save = () => {
-  const { id, name, permissions, users } = cloneDeep(currentPermission)
+const save = async () => {
+  const { id, name, permissions, users, roles, departments } = cloneDeep(currentPermission)
 
   const permissionsObj = permissions.map((ele: any) => {
     return {
@@ -473,32 +529,49 @@ const save = () => {
           : JSON.stringify({}),
     }
   })
+  const selectedUsers =
+    isCreate.value || activeStep.value === 1
+      ? selectPermissionRef.value.checkTableList.map((ele: any) => ele.id)
+      : users
+  const selectedRoles =
+    isCreate.value || activeStep.value === 1
+      ? selectRoleRef.value.checkedTableList.map((ele: any) => ele.id)
+      : roles || []
+  const selectedDepts =
+    isCreate.value || activeStep.value === 1
+      ? selectDeptRef.value.checkedTableList.map((ele: any) => ele.id)
+      : departments || []
+
   const obj = {
     id,
     name,
     permissions: permissionsObj,
-    users:
-      isCreate.value || activeStep.value === 1
-        ? selectPermissionRef.value.checkTableList.map((ele: any) => ele.id)
-        : users,
+    users: selectedUsers,
   }
   if (!id) {
     delete obj.id
   }
   if (saveLoading.value) return
   saveLoading.value = true
-  savePermissions(obj)
-    .then(() => {
-      ElMessage({
-        type: 'success',
-        message: t('common.save_success'),
-      })
-      beforeClose()
-      handleSearch()
+  try {
+    await savePermissions(obj)
+    // Update rule targets (roles/departments) for EACH rule in the permission group
+    // The role_list/dept_list are stored on ds_rules, not ds_permission
+    const ruleIds = permissionsObj
+      .map((ele: any) => ele.id)
+      .filter((rid: any) => rid != null && String(rid) !== '' && String(rid) !== '0')
+    for (const ruleId of ruleIds) {
+      await updateRuleTargets(ruleId, { roles: selectedRoles, departments: selectedDepts })
+    }
+    ElMessage({
+      type: 'success',
+      message: t('common.save_success'),
     })
-    .finally(() => {
-      saveLoading.value = false
-    })
+    beforeClose()
+    handleSearch()
+  } finally {
+    saveLoading.value = false
+  }
 }
 const savePermission = () => {
   if (!isCreate.value && activeStep.value === 0) {
@@ -582,6 +655,8 @@ const columnRules = {
             :name="ele.name"
             :type="ele.users.length"
             :num="ele.permissions.length"
+            :role-count="permissionTargetsMap[String(ele.id)]?.roles?.length || 0"
+            :dept-count="permissionTargetsMap[String(ele.id)]?.departments?.length || 0"
             @edit="handleEditRule(ele)"
             @del="deleteHandler(ele)"
             @set-user="setUser(ele)"
@@ -622,7 +697,7 @@ const columnRules = {
               <template #title> {{ $t('permission.set_permission_rule') }} </template>
             </el-step>
             <el-step>
-              <template #title> {{ $t('permission.select_restricted_user') }} </template>
+              <template #title> {{ $t('permission.select_restricted_target') }} </template>
             </el-step>
           </el-steps>
         </div>
@@ -764,7 +839,17 @@ const columnRules = {
       <div v-show="activeStep !== 0" class="select-permission_content">
         <el-scrollbar>
           <div class="scroll-content">
-            <SelectPermission ref="selectPermissionRef"></SelectPermission>
+            <el-tabs v-model="activeTargetTab">
+              <el-tab-pane :label="$t('permission.tab_user')" name="user">
+                <SelectPermission ref="selectPermissionRef"></SelectPermission>
+              </el-tab-pane>
+              <el-tab-pane :label="$t('permission.tab_role')" name="role">
+                <SelectRole ref="selectRoleRef"></SelectRole>
+              </el-tab-pane>
+              <el-tab-pane :label="$t('permission.tab_department')" name="department">
+                <SelectDepartment ref="selectDeptRef"></SelectDepartment>
+              </el-tab-pane>
+            </el-tabs>
           </div>
         </el-scrollbar>
       </div>

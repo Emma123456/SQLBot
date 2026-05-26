@@ -13,6 +13,40 @@ import { getLocale } from './utils'
 import { useAssistantStore } from '@/stores/assistant'
 import { useRouter } from 'vue-router'
 import JSONBig from 'json-bigint'
+
+// Configure json-bigint to store large integers as strings instead of BigNumber objects.
+// This prevents BigInt precision loss when IDs exceed JavaScript's safe integer range (2^53-1).
+// All IDs > 15 digits will be strings, matching the backend's json_encoders behavior.
+const JSONBigString = JSONBig({ storeAsString: true })
+
+/**
+ * Recursively walk a parsed JSON object and convert all number-typed ID fields to strings.
+ * This ensures consistent string types for ALL IDs (both small and large),
+ * eliminating the mixed number/string type problem that causes BigInt comparison bugs.
+ * Field names ending with "id" or "_id" (case-insensitive) are converted.
+ */
+const ID_FIELD_PATTERN = /(^id$|[_-]id$|Id$)/i
+function normalizeIdsToStrings(obj: any): any {
+  if (obj === null || obj === undefined) return obj
+  if (Array.isArray(obj)) return obj.map(normalizeIdsToStrings)
+  if (typeof obj === 'object') {
+    const result: any = {}
+    for (const key of Object.keys(obj)) {
+      const value = obj[key]
+      if (ID_FIELD_PATTERN.test(key) && typeof value === 'number') {
+        result[key] = String(value)
+      } else if (Array.isArray(value)) {
+        result[key] = value.map(normalizeIdsToStrings)
+      } else if (typeof value === 'object' && value !== null) {
+        result[key] = normalizeIdsToStrings(value)
+      } else {
+        result[key] = value
+      }
+    }
+    return result
+  }
+  return obj
+}
 // import { i18n } from '@/i18n'
 // const t = i18n.global.t
 const assistantStore = useAssistantStore()
@@ -63,14 +97,20 @@ class HttpService {
         ...config?.headers,
       },
       // add transformResponse to bigint
+      // We use a two-step approach:
+      // 1. JSONBig with storeAsString converts large integers (>2^53-1) to strings
+      // 2. A recursive walk converts ALL remaining number-typed IDs to strings
+      // This eliminates the mixed number/string type problem at the root.
       transformResponse: [
         function (data) {
           try {
-            return JSONBig.parse(data) // use JSON-bigint
+            const parsed = JSONBigString.parse(data)
+            return normalizeIdsToStrings(parsed)
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
           } catch (e) {
             try {
-              return JSON.parse(data)
+              const parsed = JSON.parse(data)
+              return normalizeIdsToStrings(parsed)
               // eslint-disable-next-line @typescript-eslint/no-unused-vars
             } catch (parseError) {
               return data

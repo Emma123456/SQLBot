@@ -28,7 +28,13 @@ async def get_user_info(*, session: Session, user_id: int) -> UserInfoDTO | None
     db_user: UserModel = get_db_user(session = session, user_id = user_id)
     if not db_user:
         return None
-    userInfo = UserInfoDTO.model_validate(db_user.model_dump())
+    user_dict = db_user.model_dump()
+    # Ensure role_ids and dept_ids are never None — default to empty list
+    if user_dict.get('role_ids') is None:
+        user_dict['role_ids'] = []
+    if user_dict.get('dept_ids') is None:
+        user_dict['dept_ids'] = []
+    userInfo = UserInfoDTO.model_validate(user_dict)
     userInfo.isAdmin = userInfo.id == 1 and userInfo.account == 'admin'
     if userInfo.isAdmin:
         return userInfo

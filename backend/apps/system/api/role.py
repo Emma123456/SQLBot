@@ -13,6 +13,7 @@ from apps.system.crud.role import (
     remove_users_from_role,
     update_role,
 )
+from apps.system.crud.user import clean_user_cache
 from apps.system.schemas.system_schema import RoleCreate, RoleUpdate
 from common.core.deps import CurrentUser, SessionDep
 
@@ -97,8 +98,11 @@ async def delete(session: SessionDep, current_user: CurrentUser, role_id: int):
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can delete roles")
     try:
-        delete_role(session, role_id)
+        affected_uids = delete_role(session, role_id)
         session.commit()
+        # Clear user info cache for affected users so role_ids is refreshed
+        for uid in affected_uids:
+            await clean_user_cache(uid)
         return {"message": "Role deleted successfully"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -124,8 +128,10 @@ async def assign_users(
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can assign users to roles")
     try:
-        assign_users_to_role(session, role_id, dto.user_ids)
+        affected_uids = assign_users_to_role(session, role_id, dto.user_ids)
         session.commit()
+        for uid in affected_uids:
+            await clean_user_cache(uid)
         return {"message": "Users assigned successfully"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -140,10 +146,12 @@ async def remove_users(
 ):
     """Remove users from a role. Admin only."""
     if not current_user.isAdmin:
-        raise HTTPException(status_code=403, detail="Only admin can remove users from roles")
+        raise HTTPException(status_code=403, detail="Only admin can users from roles")
     try:
-        remove_users_from_role(session, role_id, dto.user_ids)
+        affected_uids = remove_users_from_role(session, role_id, dto.user_ids)
         session.commit()
+        for uid in affected_uids:
+            await clean_user_cache(uid)
         return {"message": "Users removed successfully"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

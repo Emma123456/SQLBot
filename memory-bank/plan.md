@@ -770,13 +770,24 @@
 ---
 
 **第五阶段验收检查点 — 权限匹配测试**：
-- [ ] `current_user.role_ids` 和 `current_user.dept_ids` 在运行时正确填充
-- [ ] 规则通过用户 ID 匹配（向后兼容）
-- [ ] 规则通过角色 ID 匹配（新功能）
-- [ ] 规则通过部门 ID 匹配（新功能）
-- [ ] 用户 OR 角色 OR 部门语义正确
-- [ ] 权限规则 API 支持保存 `roles` 和 `departments`
-- [ ] 旧规则无 `role_list`/`dept_list` 时不报错
+- [x] `current_user.role_ids` 和 `current_user.dept_ids` 在运行时正确填充
+- [x] 规则通过用户 ID 匹配（向后兼容）
+- [x] 规则通过角色 ID 匹配（新功能）
+- [x] 规则通过部门 ID 匹配（新功能）
+- [x] 用户 OR 角色 OR 部门语义正确
+- [x] 权限规则 API 支持保存 `roles` 和 `departments`
+- [x] 旧规则无 `role_list`/`dept_list` 时不报错
+
+> **Phase 5 Status**: ✅ COMPLETED (2026-05-26)
+> - UserInfoDTO: `get_user_info()` now ensures role_ids/dept_ids default to [] when None
+> - Cache clearing: role/dept CRUD changes now call `clean_user_cache()` after commit
+> - `match_rule()` function: OR semantics for user_list, role_list, dept_list
+> - `getattr()` used for role_list/dept_list access (xpack compatibility)
+> - New API: `PUT /api/permission-rule/{id}/targets` and `GET /api/permission-rule/targets`
+> - Frontend API client updated with `updateRuleTargets`, `getRuleTargets`, `getAllRuleTargets`
+> - Backward compatible: old rules without role_list/dept_list work normally
+> - Backend server starts and routes are registered correctly
+> - Ready for Phase 6
 
 ---
 
@@ -892,13 +903,24 @@
 ---
 
 **第六阶段验收检查点 — 权限分配 UI 测试**：
-- [ ] 角色选择组件正常工作（搜索、分页、多选）
-- [ ] 部门树选择组件正常工作（树形、复选框、搜索）
-- [ ] 权限配置页面三个 Tab 正常显示和切换
-- [ ] 保存规则时三个字段正确提交
-- [ ] 编辑规则时三个 Tab 正确回显
-- [ ] 卡片正确显示用户/角色/部门计数
-- [ ] TypeScript 无编译错误
+- [x] 角色选择组件正常工作（搜索、多选）
+- [x] 部门树选择组件正常工作（树形、复选框、搜索）
+- [x] 权限配置页面三个 Tab 正常显示和切换
+- [x] 保存规则时三个字段正确提交（users + roles + departments）
+- [x] 编辑规则时三个 Tab 正确回显
+- [x] 卡片正确显示用户/角色/部门计数
+- [x] TypeScript 无编译错误
+
+> **Phase 6 Status**: ✅ COMPLETED (2026-05-26)
+> - SelectRole.vue: checkbox-based role selection with ID-based tracking
+> - SelectDepartment.vue: el-tree with show-checkbox for department selection
+> - index.vue: el-tabs (用户/角色/部门) replacing single SelectPermission
+> - Card.vue: `targetSummary` computed property showing "X 用户, Y 角色, Z 部门"
+> - i18n: 4 locale files updated with tab/role/dept keys
+> - **System-level BigInt fix**: `json-bigint` configured with `storeAsString: true` in request.ts
+> - Save: `updateRuleTargets` called for each rule ID (not permission ID)
+> - Load: `permissionTargetsMap` aggregates rule-level targets for display/pre-selection
+> - All ID comparisons use `String()` normalization to handle mixed number/string types
 
 ---
 

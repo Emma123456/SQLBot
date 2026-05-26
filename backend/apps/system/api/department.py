@@ -13,6 +13,7 @@ from apps.system.crud.department import (
     remove_users_from_department,
     update_department,
 )
+from apps.system.crud.user import clean_user_cache
 from apps.system.schemas.system_schema import DepartmentCreate, DepartmentUpdate
 from common.core.deps import CurrentUser, SessionDep
 
@@ -108,8 +109,10 @@ async def assign_users(
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can assign users to departments")
     try:
-        assign_users_to_department(session, dept_id, dto.user_ids, dto.is_primary)
+        affected_uids = assign_users_to_department(session, dept_id, dto.user_ids, dto.is_primary)
         session.commit()
+        for uid in affected_uids:
+            await clean_user_cache(uid)
         return {"message": "Users assigned successfully"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -126,8 +129,10 @@ async def remove_users(
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can remove users from departments")
     try:
-        remove_users_from_department(session, dept_id, dto.user_ids)
+        affected_uids = remove_users_from_department(session, dept_id, dto.user_ids)
         session.commit()
+        for uid in affected_uids:
+            await clean_user_cache(uid)
         return {"message": "Users removed successfully"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

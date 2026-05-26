@@ -507,6 +507,93 @@ Agent(subagent_type="Browser", prompt="...")
 Phase 3 实现角色管理时，完全复用 Phase 2 部门管理的代码模式（CRUD → API → Router → API Client → Vue Page → i18n），
 减少了探索时间，避免了重复犯错。**新功能实现前，先找已有类似功能作为模板**。
 
+### 14. BigInt ID 统一为 string 类型（系统级修复）
+
+SQLBot 使用雪花 ID（18+ 位数），超过 JavaScript 安全整数范围（2^53-1）。
+`json-bigint` 默认将大整数解析为 BigNumber 对象，导致：
+- 类型不一致：BigNumber / Number / String 混用
+- 精度丢失：`Number("7464894896843788288")` → `7464894896843788000`
+- 比较失败：`BigNumber !== String`
+- `typeof rid === 'number'` 过滤器静默丢弃 string 类型 ID
+
+此问题曾引发三次 Bug（部门树显示、权限目标预选、保存过滤器）。
+
+**系统级修复**（`frontend/src/utils/request.ts` 两层机制）：
+
+```typescript
+// 第一层：json-bigint storeAsString 将大整数(>2^53-1)转为 string
+const JSONBigString = JSONBig({ storeAsString: true })
+
+// 第二层：normalizeIdsToStrings 递归遍历，将所有 number 类型的 ID 字段转为 string
+const ID_FIELD_PATTERN = /(^id$|[_-]id$|Id$)/i
+function normalizeIdsToStrings(obj: any): any {
+  if (obj === null || obj === undefined) return obj
+  if (Array.isArray(obj)) return obj.map(normalizeIdsToStrings)
+  if (typeof obj === 'object') {
+    const result: any = {}
+    for (const key of Object.keys(obj)) {
+      const value = obj[key]
+      if (ID_FIELD_PATTERN.test(key) && typeof value === 'number') {
+        result[key] = String(value)  // id: 1 → id: "1"
+      } else if (Array.isArray(value)) {
+        result[key] = value.map(normalizeIdsToStrings)
+      } else if (typeof value === 'object' && value !== null) {
+        result[key] = normalizeIdsToStrings(value)
+      } else {
+        result[key] = value
+      }
+    }
+    return result
+  }
+  return obj
+}
+```
+
+**结果：前端所有 ID 字段统一为 `string` 类型**，无论大小。
+
+**编码规范**：
+1. ❌ **禁止** `typeof rid === 'number'` 过滤 ID — 用 `rid != null && String(rid) !== ''`
+2. ID 数组类型用 `any[]` 或 `string[]`，❌ 禁止 `number[]`
+3. `el-checkbox :value` 和 `el-tree node-key="id"` 原生支持 string ID
+4. 后端 Pydantic `List[int]` 自动将 string 转为 int — 无需前端转换
+5. string ID 之间可直接用 `===` 比较，无需 `String()` 包裹（但包裹无害）
+6. 新增 ID 字段命名必须匹配 `/(^id$|[_-]id$|Id$)/i` 才能被自动转换
+
+### 15. 聚合层级数据需要 computed 桥接
+
+当数据存储粒度与 UI 操作粒度不同时，用 computed 属性桥接，而非在 save/load 时临时转换。
+
+例如：`role_list`/`dept_list` 存储在 `ds_rules`（规则级别），但 UI 在 `ds_permission`（权限组级别）操作。
+使用 `permissionTargetsMap` computed 属性聚合所有规则的 target 到权限组级别：
+
+```typescript
+const permissionTargetsMap = computed(() => {
+  const map: Record<string, { roles: string[]; departments: string[] }> = {}
+  for (const perm of ruleList.value) {
+    const roleSet = new Set<string>()
+    const deptSet = new Set<string>()
+    for (const rule of perm.permissions || []) {
+      const targets = ruleTargetsMap.value[String(rule.id)]
+      if (targets) {
+        targets.roles.forEach((r) => roleSet.add(String(r)))
+        targets.departments.forEach((d) => deptSet.add(String(d)))
+      }
+    }
+    map[String(perm.id)] = { roles: [...roleSet], departments: [...deptSet] }
+  }
+  return map
+})
+```
+
+### 16. 根因修复优于逐个 workaround
+
+当同一根因引发两次以上 Bug 时，停止局部修复，投资系统级解决方案。
+
+BigInt ID 问题的三次 Bug 都是不同表面的 workaround（`String()` 包裹、`.map(Number)` 修改、类型过滤器修改），
+但根因是 ID 类型不一致。最终通过 `storeAsString + normalizeIdsToStrings` 一次性解决。
+
+**教训**：第二次出现同类问题时，花时间做根因分析并系统修复，而非继续打补丁。
+
 ---
 
 ## 最终说明

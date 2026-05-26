@@ -3,6 +3,7 @@ from sqlmodel import Session, select, func, delete as sqlmodel_delete
 from apps.system.models.department_model import SysDepartment, SysUserDept
 from apps.system.models.user import UserModel
 from apps.system.crud.user_role_dept import refresh_user_dept_ids
+from apps.system.crud.user import clean_user_cache
 from common.utils.time import get_timestamp
 from common.utils.utils import SQLBotLogUtil
 
@@ -199,8 +200,9 @@ def assign_users_to_department(
     dept_id: int,
     user_ids: list[int],
     is_primary: bool = False
-) -> None:
-    """Assign users to a department. Adds new associations (does not remove existing)."""
+) -> list[int]:
+    """Assign users to a department. Adds new associations (does not remove existing).
+    Returns list of affected user IDs."""
     dept = session.get(SysDepartment, dept_id)
     if not dept:
         raise ValueError(f"Department with ID {dept_id} does not exist")
@@ -229,13 +231,16 @@ def assign_users_to_department(
     for uid in affected_uids:
         refresh_user_dept_ids(session, uid)
 
+    return affected_uids
+
 
 def remove_users_from_department(
     session: Session,
     dept_id: int,
     user_ids: list[int]
-) -> None:
-    """Remove users from a department."""
+) -> list[int]:
+    """Remove users from a department.
+    Returns list of affected user IDs."""
     affected_uids = []
     for uid in user_ids:
         ud = session.exec(
@@ -253,3 +258,5 @@ def remove_users_from_department(
     # Refresh redundant fields for affected users
     for uid in affected_uids:
         refresh_user_dept_ids(session, uid)
+
+    return affected_uids

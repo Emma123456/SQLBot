@@ -3,6 +3,7 @@ from sqlmodel import Session, select, func
 from apps.system.models.role_model import SysRole, SysUserRole
 from apps.system.models.user import UserModel
 from apps.system.crud.user_role_dept import refresh_user_role_ids
+from apps.system.crud.user import clean_user_cache
 from common.utils.time import get_timestamp
 from common.utils.utils import SQLBotLogUtil
 
@@ -108,8 +109,9 @@ def update_role(
     return role
 
 
-def delete_role(session: Session, role_id: int) -> bool:
-    """Delete a role and its user associations, then refresh affected users' role_ids."""
+def delete_role(session: Session, role_id: int) -> list[int]:
+    """Delete a role and its user associations, then refresh affected users' role_ids.
+    Returns list of affected user IDs."""
     role = session.get(SysRole, role_id)
     if not role:
         raise ValueError(f"Role with ID {role_id} does not exist")
@@ -133,7 +135,7 @@ def delete_role(session: Session, role_id: int) -> bool:
         refresh_user_role_ids(session, uid)
     
     SQLBotLogUtil.info(f"Deleted role: {role.name} (ID: {role_id}), affected {len(affected_uids)} user(s)")
-    return True
+    return affected_uids
 
 
 def get_role_users(session: Session, role_id: int) -> list[dict]:
@@ -164,8 +166,9 @@ def assign_users_to_role(
     session: Session,
     role_id: int,
     user_ids: list[int]
-) -> None:
-    """Assign users to a role. Adds new associations (does not remove existing)."""
+) -> list[int]:
+    """Assign users to a role. Adds new associations (does not remove existing).
+    Returns list of affected user IDs."""
     role = session.get(SysRole, role_id)
     if not role:
         raise ValueError(f"Role with ID {role_id} does not exist")
@@ -193,13 +196,16 @@ def assign_users_to_role(
     for uid in affected_uids:
         refresh_user_role_ids(session, uid)
 
+    return affected_uids
+
 
 def remove_users_from_role(
     session: Session,
     role_id: int,
     user_ids: list[int]
-) -> None:
-    """Remove users from a role."""
+) -> list[int]:
+    """Remove users from a role.
+    Returns list of affected user IDs."""
     affected_uids = []
     for uid in user_ids:
         ur = session.exec(
@@ -217,3 +223,5 @@ def remove_users_from_role(
     # Refresh redundant fields for affected users
     for uid in affected_uids:
         refresh_user_role_ids(session, uid)
+
+    return affected_uids

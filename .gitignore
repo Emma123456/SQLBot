@@ -8,6 +8,9 @@ node_modules/
 *-lock.json
 components.d.ts
 
+# Database data files
+data/postgresql/pgdata/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
