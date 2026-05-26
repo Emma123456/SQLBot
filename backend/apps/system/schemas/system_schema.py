@@ -74,6 +74,8 @@ class UserEditor(UserCreator, BaseCreatorDTO):
 class UserGrid(UserEditor):
     create_time: int = Field(description=f"{PLACEHOLDER_PREFIX}create_time")
     language: str = Field(default="zh-CN" ,description=f"{PLACEHOLDER_PREFIX}language") 
+    role_ids: Optional[list[int]] = Field(default=[], description="角色ID列表")
+    dept_ids: Optional[list[int]] = Field(default=[], description="部门ID列表")
     # space_name: Optional[str] = None
     # origin: str = ''
 

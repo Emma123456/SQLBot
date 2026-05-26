@@ -22,10 +22,10 @@ def build_department_tree(departments: list[SysDepartment]) -> list[dict]:
     
     def dept_to_dict(dept: SysDepartment) -> dict:
         result = {
-            "id": dept.id,
+            "id": str(dept.id) if isinstance(dept.id, int) and dept.id > (2**53 - 1) else dept.id,
             "name": dept.name,
             "code": dept.code,
-            "parent_id": dept.parent_id,
+            "parent_id": str(dept.parent_id) if isinstance(dept.parent_id, int) and dept.parent_id > (2**53 - 1) else dept.parent_id,
             "origin": dept.origin,
             "create_time": dept.create_time,
             "children": []

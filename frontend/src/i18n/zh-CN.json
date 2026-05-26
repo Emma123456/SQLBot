@@ -606,6 +606,7 @@
     "operate_with_caution": "删除后，该工作空间下的用户将被移除，所有资源也将被删除，请谨慎操作。"
   },
   "role": {
+    "role": "角色",
     "management": "角色管理",
     "create": "新建角色",
     "edit": "编辑角色",
@@ -620,6 +621,7 @@
     "remove_user_confirm": "确定将用户 \"{name}\" 从该角色移除吗？"
   },
   "department": {
+    "department": "部门",
     "management": "部门管理",
     "create": "新建部门",
     "edit": "编辑部门",

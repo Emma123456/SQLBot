@@ -606,6 +606,7 @@
     "operate_with_caution": "After deletion, the users under the workspace will be removed and all resources will be deleted. Please operate with caution."
   },
   "department": {
+    "department": "Department",
     "management": "Department Management",
     "create": "Create Department",
     "edit": "Edit Department",
@@ -621,6 +622,7 @@
     "remove_user_confirm": "Are you sure to remove user \"{name}\" from this department?"
   },
   "role": {
+    "role": "Role",
     "management": "Role Management",
     "create": "Create Role",
     "edit": "Edit Role",

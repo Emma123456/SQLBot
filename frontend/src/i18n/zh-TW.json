@@ -606,6 +606,7 @@
     "operate_with_caution": "刪除後，該工作區下的使用者將被移除，所有資源也將被刪除，請謹慎操作。"
   },
   "department": {
+    "department": "部門",
     "management": "部門管理",
     "create": "新建部門",
     "edit": "編輯部門",
@@ -621,6 +622,7 @@
     "remove_user_confirm": "確定將使用者 \"{name}\" 從該部門移除嗎？"
   },
   "role": {
+    "role": "角色",
     "management": "角色管理",
     "create": "新建角色",
     "edit": "編輯角色",

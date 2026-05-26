@@ -97,15 +97,15 @@
         style="width: 100%"
         @selection-change="handleSelectionChange"
       >
-        <el-table-column type="selection" width="55" />
-        <el-table-column prop="name" show-overflow-tooltip :label="$t('user.name')" width="280" />
+        <el-table-column type="selection" width="45" />
+        <el-table-column prop="name" show-overflow-tooltip :label="$t('user.name')" min-width="120" />
         <el-table-column
           prop="account"
           show-overflow-tooltip
           :label="$t('user.account')"
-          width="280"
+          min-width="120"
         />
-        <el-table-column prop="status" :label="$t('user.user_status')" width="180">
+        <el-table-column prop="status" :label="$t('user.user_status')" width="90">
           <template #default="scope">
             <div class="user-status-container" :class="[scope.row.status ? 'active' : 'disabled']">
               <el-icon size="16">
@@ -116,30 +116,51 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="email" show-overflow-tooltip :label="$t('user.email')" />
-        <!-- <el-table-column prop="phone" :label="$t('user.phone_number')" width="280" /> -->
-        <el-table-column prop="origin" :label="$t('user.user_source')" width="120">
+        <el-table-column prop="role_ids" :label="$t('role.role')" min-width="120">
           <template #default="scope">
-            <span>{{ formatUserOrigin(scope.row.origin) }}</span>
+            <span v-if="!scope.row.role_ids?.length">-</span>
+            <el-tag
+              v-for="rid in scope.row.role_ids || []"
+              :key="rid"
+              size="small"
+              type="primary"
+              style="margin: 2px"
+            >
+              {{ getRoleName(rid) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="dept_ids" :label="$t('department.department')" min-width="120">
+          <template #default="scope">
+            <span v-if="!scope.row.dept_ids?.length">-</span>
+            <el-tag
+              v-for="did in scope.row.dept_ids || []"
+              :key="did"
+              size="small"
+              type="success"
+              style="margin: 2px"
+            >
+              {{ getDeptName(did) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column
           show-overflow-tooltip
           prop="oid_list"
           :label="$t('user.workspace')"
-          width="280"
+          min-width="120"
         >
           <template #default="scope">
             <span>{{ formatSpaceName(scope.row.oid_list) }}</span>
           </template>
         </el-table-column>
 
-        <el-table-column prop="create_time" width="180" sortable :label="$t('user.creation_time')">
+        <el-table-column prop="create_time" width="160" sortable :label="$t('user.creation_time')">
           <template #default="scope">
             <span>{{ formatTimestamp(scope.row.create_time, 'YYYY-MM-DD HH:mm:ss') }}</span>
           </template>
         </el-table-column>
-        <el-table-column fixed="right" width="150" :label="$t('ds.actions')">
+        <el-table-column fixed="right" width="120" :label="$t('ds.actions')">
           <template #default="scope">
             <div class="table-operate">
               <el-switch
@@ -331,6 +352,39 @@
           autocomplete="off"
           clearable
         />
+      </el-form-item>
+
+      <!-- Read-only: origin -->
+      <el-form-item v-if="state.form.id" :label="$t('user.user_source')">
+        <span>{{ formatUserOrigin(state.form.origin) }}</span>
+      </el-form-item>
+
+      <!-- Read-only: roles -->
+      <el-form-item v-if="state.form.id" :label="$t('role.role')">
+        <span v-if="!state.form.role_ids?.length">-</span>
+        <el-tag
+          v-for="rid in state.form.role_ids || []"
+          :key="rid"
+          size="small"
+          type="primary"
+          style="margin: 2px"
+        >
+          {{ getRoleName(rid) }}
+        </el-tag>
+      </el-form-item>
+
+      <!-- Read-only: departments -->
+      <el-form-item v-if="state.form.id" :label="$t('department.department')">
+        <span v-if="!state.form.dept_ids?.length">-</span>
+        <el-tag
+          v-for="did in state.form.dept_ids || []"
+          :key="did"
+          size="small"
+          type="success"
+          style="margin: 2px"
+        >
+          {{ getDeptName(did) }}
+        </el-tag>
       </el-form-item>
       <!-- <el-form-item :label="$t('user.phone_number')">
         <el-input
@@ -629,6 +683,8 @@ import logo_lark from '@/assets/img/lark.png'
 import logo_wechat_work from '@/assets/img/wechat.png'
 import icon_add_outlined from '@/assets/svg/icon_add_outlined.svg'
 import { userApi } from '@/api/user'
+import { roleApi } from '@/api/role'
+import { departmentApi } from '@/api/department'
 import field_text from '@/assets/svg/field_text.svg'
 import field_time from '@/assets/svg/field_time.svg'
 import field_value from '@/assets/svg/field_value.svg'
@@ -713,6 +769,8 @@ const defaultForm = {
 
 const extAttrs = ref<{ key: string; value: string }[]>([])
 const options = ref<any[]>([])
+const roleOptions = ref<any[]>([])
+const deptTreeOptions = ref<any[]>([])
 const variables = shallowRef<any[]>([])
 const variableValueMap = shallowRef<any>({})
 const state = reactive<any>({
@@ -1236,6 +1294,25 @@ const handleCurrentChange = (val: number) => {
   state.pageInfo.currentPage = val
   search()
 }
+const getRoleName = (rid: number) => {
+  const role = roleOptions.value.find((r: any) => r.id === rid)
+  return role?.name || rid
+}
+
+const getDeptName = (did: number) => {
+  const findName = (nodes: any[]): string => {
+    for (const node of nodes) {
+      if (node.id === did) return node.name
+      if (node.children?.length) {
+        const found = findName(node.children)
+        if (found) return found
+      }
+    }
+    return ''
+  }
+  return findName(deptTreeOptions.value) || String(did)
+}
+
 const formatSpaceName = (row_oid_list: Array<any>) => {
   if (!row_oid_list?.length) {
     return '-'
@@ -1286,6 +1363,21 @@ onMounted(() => {
     options.value = res || []
     filterOption.value[2].option = [...options.value]
   })
+  
+  // Load role options for table display name resolution
+  roleApi.all().then((res: any) => {
+    roleOptions.value = res || []
+  }).catch(() => {
+    roleOptions.value = []
+  })
+  
+  // Load department tree for table display name resolution
+  departmentApi.tree().then((res: any) => {
+    deptTreeOptions.value = res || []
+  }).catch(() => {
+    deptTreeOptions.value = []
+  })
+  
   handleCurrentChange(1)
 
   loadDefaultPwd()

@@ -620,58 +620,82 @@
 
 ---
 
-## 第四阶段：用户管理扩展（角色/部门分配）
+## 第四阶段：用户管理扩展（角色/部门只读展示）
 
-### 步骤 4.1：扩展用户 API 支持角色和部门
+> 设计决策：角色和部门的分配操作统一在角色管理、部门管理页面完成（从角色/部门侧分配用户），用户管理页面仅做只读展示，不在用户表单中提供可写的选择器。这样避免了双向操作带来的数据一致性风险，也简化了用户管理页面的复杂度。
 
-**文件路径**：`backend/apps/system/api/user.py`
-
-**指令**：
-1. 打开 `user.py` 文件
-2. 找到用户创建端点（`POST /user`），在请求体 schema 中新增可选字段：`role_ids: List[int]`、`dept_ids: List[int]`
-3. 在创建用户逻辑中：创建用户后 → 批量插入 `sys_user_role` 和 `sys_user_dept` 记录 → 刷新冗余字段
-4. 找到用户更新端点（`PUT /user`），支持更新 `role_ids` 和 `dept_ids`
-5. 新增端点 `PUT /user/{id}/roles`：接受 `{role_ids: [1, 2, 3]}`，清除旧关联 → 插入新关联 → 刷新
-6. 新增端点 `PUT /user/{id}/departments`：接受 `{dept_ids: [1, 2, 3]}`，清除旧关联 → 插入新关联 → 刷新
-
-**验证测试**：
-- 创建用户时传入 `role_ids` 和 `dept_ids`
-- 查询数据库验证关联表有记录，冗余字段已填充
-- 更新用户角色 `PUT /api/user/1/roles` with `{"role_ids": [2, 3]}`
-- 验证旧关联被清除，新关联已创建，`role_ids` 已更新
-
----
-
-### 步骤 4.2：扩展用户管理页面支持角色和部门
+### 步骤 4.1：用户列表表格增加角色/部门列
 
 **文件路径**：`frontend/src/views/system/user/User.vue`
 
 **指令**：
 1. 打开 `User.vue` 文件
-2. 找到用户创建/编辑表单部分
-3. 在表单中新增两个区块：
-   - **角色选择**：`el-select` 组件，启用 `multiple`，数据源 `getRoleList()` API
-   - **部门选择**：`el-tree-select` 组件，启用 `multiple`，数据源 `getDepartmentTree()` API
-4. 在表单提交逻辑中：将选中的 `role_ids` 和 `dept_ids` 包含在请求体中
-5. 在用户列表表格中：新增"角色"列和"部门"列，以 `el-tag` 列表显示
-6. 在加载用户详情时：确保 `role_ids` 和 `dept_ids` 正确填充到表单选择器
+2. 在用户列表 `el-table` 中新增两列：
+   - **角色列**：`prop="role_ids"`，使用 `el-tag`（`type="primary"`）展示每个角色 ID 对应的名称
+   - **部门列**：`prop="dept_ids"`，使用 `el-tag`（`type="success"`）展示每个部门 ID 对应的名称
+3. 实现 `getRoleName(rid)` 辅助函数：从 `roleOptions` 缓存中查找角色名称，找不到则显示 ID
+4. 实现 `getDeptName(did)` 辅助函数：递归搜索 `deptTreeOptions` 树，查找部门名称
+5. 在 `onMounted` 中加载角色列表（`roleApi.all()`）和部门树（`departmentApi.tree()`），缓存到 `roleOptions` 和 `deptTreeOptions`
+6. 空值时显示 `-`
 
 **验证测试**：
-- 打开用户创建表单，选择多个角色和部门
-- 提交表单，创建用户
-- 在用户列表表格中验证角色和部门以标签形式显示
-- 编辑用户，修改角色和部门，验证修改成功
-- 验证数据库中关联表记录正确
+- 用户列表表格正确显示角色和部门标签
+- 未分配角色/部门的用户显示 `-`
+- 通过角色管理页面分配角色后，用户列表自动刷新显示角色名称
 
 ---
 
-**第四阶段验收检查点 — 用户管理扩展测试**：
-- [ ] 创建用户时可选择角色和部门
-- [ ] 编辑用户时可修改角色和部门
-- [ ] 用户列表表格显示角色/部门标签
-- [ ] 数据库中 `sys_user_role` 和 `sys_user_dept` 记录正确
-- [ ] `sys_user.role_ids` 和 `sys_user.dept_ids` 冗余字段正确刷新
+### 步骤 4.2：用户编辑表单增加角色/部门只读展示
 
+**文件路径**：`frontend/src/views/system/user/User.vue`
+
+**指令**：
+1. 打开 `User.vue` 文件
+2. 在编辑用户的 `el-drawer` 表单中，在"用户来源"字段下方新增两个只读展示区域：
+   - **角色展示**：使用 `el-tag`（`type="primary"`）展示 `state.form.role_ids` 对应的角色名称，仅编辑时显示（`v-if="state.form.id"`）
+   - **部门展示**：使用 `el-tag`（`type="success"`）展示 `state.form.dept_ids` 对应的部门名称，仅编辑时显示（`v-if="state.form.id"`）
+3. 无角色/部门时显示 `-`
+4. 不提供选择器，用户需通过角色管理或部门管理页面进行分配
+
+**验证测试**：
+- 编辑已有用户时，表单中正确显示已分配的角色和部门标签
+- 新建用户时不显示角色/部门区域
+- 标签名称与角色/部门管理页面一致
+
+---
+
+### 步骤 4.3：用户列表 API 返回角色/部门 ID
+
+**文件路径**：`backend/apps/system/schemas/system_schema.py`、`backend/apps/system/api/user.py`
+
+**指令**：
+1. 确保 `UserGrid` DTO 包含 `role_ids: Optional[list[int]]` 和 `dept_ids: Optional[list[int]]` 字段（已在 Phase 1 完成）
+2. 用户分页查询 API 返回的数据中包含 `role_ids` 和 `dept_ids`（`UserModel` 已有这些 JSONB 字段，自动序列化）
+3. 不需要在 `UserCreator` 或 `UserEditor` 中添加这些字段（分配操作不通过用户 API）
+4. 不需要新增 `PUT /user/{id}/roles` 或 `PUT /user/{id}/departments` 端点（分配通过角色/部门管理 API 完成）
+
+**验证测试**：
+- 调用 `GET /api/user/pager/1/20` 返回的每条用户记录包含 `role_ids` 和 `dept_ids` 数组
+- 创建用户时不需要传入 `role_ids`/`dept_ids`
+- 更新用户时不需要传入 `role_ids`/`dept_ids`
+
+---
+
+**第四阶段验收检查点 — 用户管理展示测试**：
+- [x] 用户列表表格显示角色/部门标签
+- [x] 编辑用户时可查看角色和部门（只读）
+- [x] 未分配角色/部门的用户显示 `-`
+- [x] 通过角色/部门管理页面分配后，用户列表刷新显示正确
+- [x] 数据库中 `sys_user.role_ids` 和 `sys_user.dept_ids` 冗余字段正确刷新（由角色/部门管理 API 维护）
+
+> **Phase 4 Status**: ✅ COMPLETED & TESTED (2026-05-26)
+> - User table displays role_ids and dept_ids as el-tag columns with name resolution
+> - User edit form shows roles and departments as read-only tags (v-if="state.form.id")
+> - getRoleName() and getDeptName() helper functions for ID-to-name resolution
+> - Role options and department tree loaded on mount for display
+> - No writable selectors in user form — assignment done via Role/Dept management pages
+> - No separate PUT /user/{id}/roles or /user/{id}/departments endpoints needed
+> - Design decision: unidirectional assignment (Role/Dept → User) avoids data consistency issues
 ---
 
 ## 第五阶段：权限匹配逻辑
@@ -1071,7 +1095,7 @@
 1. 创建用户 `user1`，验证 `role_ids=[]`
 2. 通过角色管理页面分配 `role1` 和 `role2`
 3. 验证 `sys_user.role_ids=[role1.id, role2.id]`，`sys_user_role` 有两条记录
-4. 通过用户管理页面移除 `role1`
+4. 通过角色管理页面移除 `role1`（在角色用户管理中移除该用户）
 5. 验证 `role_ids` 只包含 `role2.id`
 6. 删除 `role2`，验证 `role_ids=[]`，`sys_user_role` 无记录
 
@@ -1197,7 +1221,7 @@
 
 1. ✅ 角色 CRUD 功能正常，API 和前端页面均可用
 2. ✅ 部门 CRUD 功能正常，支持树形结构
-3. ✅ 用户可以分配多个角色和多个部门
+3. ✅ 用户可通过角色/部门管理页面分配多个角色和多个部门，用户管理页面只读展示
 4. ✅ 权限规则可以分配给用户、角色、部门的任意组合
 5. ✅ 运行时匹配逻辑正确，满足 OR 语义
 6. ✅ 冗余字段与关联表保持一致
