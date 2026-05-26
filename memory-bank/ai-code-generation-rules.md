@@ -356,7 +356,7 @@ onMounted(() => {
 </script>
 ```
 
-## 经验教训（Phase 1-2 实战总结）
+## 经验教训（Phase 1-3 实战总结）
 
 ### 1. 前端 Element Plus 组件导入规则（严重 Bug 教训）
 
@@ -471,6 +471,41 @@ def refresh_user_role_ids(session: Session, uid: int) -> None:
 - 迁移文件必须正确设置 `down_revision` 链接到上一个迁移
 - 使用 `alembic current` 确认当前版本后再创建新迁移
 - 迁移后运行 `alembic upgrade head` 并验证
+
+### 9. E2E 测试：Playwright MCP 优于 Browser Agent
+
+Browser Agent 在多次测试中无法连接浏览器（返回空结果），而 Playwright MCP 工具稳定可用：
+
+```
+# ✅ 推荐：使用 Playwright MCP
+CallMcpTool(server_name="playwright", tool_name="browser_navigate", arguments={"url": "..."})
+CallMcpTool(server_name="playwright", tool_name="browser_snapshot", arguments={})
+CallMcpTool(server_name="playwright", tool_name="browser_type", arguments={"target": "e28", "text": "admin"})
+CallMcpTool(server_name="playwright", tool_name="browser_click", arguments={"target": "e36"})
+
+# ❌ 不推荐：Browser Agent（连接不稳定）
+Agent(subagent_type="Browser", prompt="...")
+```
+
+### 10. 前端端口与后端端口对齐
+
+`frontend/.env.development` 中 `VITE_API_BASE_URL` 指向的后端端口必须与实际运行的后端端口一致。
+启动后端前先检查端口占用（`lsof -i:8000`），避免启动多个后端实例导致前端请求打到错误端口。
+
+### 11. SQLBot 登录使用加密 OAuth2 表单
+
+登录端点 `POST /api/login/access-token` 使用 `OAuth2PasswordRequestForm`，用户名和密码经过 `sqlbot_decrypt` 解密。
+**不能用简单 curl JSON 请求测试登录**，必须通过前端页面或模拟加密流程。
+
+### 12. el-pagination v-model 参数的 ESLint 误报
+
+`v-model:current-page` 和 `v-model:page-size` 是 Vue 3 合法语法，但 ESLint 规则 `vue/no-v-model-argument` 会报错。
+这是**误报**，项目现有代码（如 User.vue）也使用同样模式，**不需要修改**。
+
+### 13. 复用已有模式可大幅提升效率
+
+Phase 3 实现角色管理时，完全复用 Phase 2 部门管理的代码模式（CRUD → API → Router → API Client → Vue Page → i18n），
+减少了探索时间，避免了重复犯错。**新功能实现前，先找已有类似功能作为模板**。
 
 ---
 
