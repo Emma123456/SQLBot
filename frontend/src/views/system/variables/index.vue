@@ -17,6 +17,8 @@ interface Form {
   name: string | null
   var_type: string
   value: any[]
+  value_type: string
+  match_mode: string
 }
 
 const { t } = useI18n()
@@ -28,6 +30,7 @@ const iconMap = {
   text: field_text,
   number: field_value,
   datetime: field_time,
+  list: field_text,
 }
 
 const selectable = (row: any) => {
@@ -51,6 +54,7 @@ const var_type = {
   text: 'model.text',
   number: 'model.number',
   datetime: 'variables.date',
+  list: 'variables.list',
 } as Record<string, unknown>
 
 const dialogTitle = ref('')
@@ -59,6 +63,8 @@ const defaultForm = {
   name: null,
   var_type: 'text',
   value: [''],
+  value_type: 'fixed',
+  match_mode: 'in',
 }
 const pageForm = ref<Form>(cloneDeep(defaultForm))
 
@@ -223,7 +229,9 @@ const rules = {
 }
 
 const varTypeChange = (val: any) => {
-  if (val === 'text') {
+  // reset value_type when switching var_type
+  pageForm.value.value_type = 'fixed'
+  if (val === 'text' || val === 'list') {
     pageForm.value.value = ['']
     return
   }
@@ -238,7 +246,7 @@ const saveHandler = () => {
         delete obj.id
       }
 
-      if (obj.var_type === 'text') {
+      if (obj.var_type === 'text' || obj.var_type === 'list') {
         obj.value = [...new Set(obj.value)]
       }
 
@@ -269,11 +277,13 @@ const editHandler = (row: any) => {
   pageForm.value.id = null
   if (row) {
     if (row.type === 'system') return
-    const { id, name, var_type, value } = row
+    const { id, name, var_type, value, value_type, match_mode } = row
     pageForm.value.id = id
     pageForm.value.name = name
     pageForm.value.var_type = var_type
     pageForm.value.value = cloneDeep(value)
+    pageForm.value.value_type = value_type || 'fixed'
+    pageForm.value.match_mode = match_mode || 'in'
   }
   dialogTitle.value = row?.id ? t('variables.edit_variable') : t('variables.add_variable')
   dialogFormVisible.value = true
@@ -516,10 +526,55 @@ const handleCurrentChange = (val: number) => {
           <el-radio value="datetime">
             {{ $t('variables.date') }}
           </el-radio>
+          <el-radio value="list">{{ $t('variables.list') }}</el-radio>
         </el-radio-group>
       </el-form-item>
 
-      <el-form-item v-if="pageForm.var_type === 'text'">
+      <!-- 值来源切换：仅 text/list 类型有意义；编辑时只读 -->
+      <el-form-item
+        v-if="pageForm.var_type === 'text' || pageForm.var_type === 'list'"
+        :label="$t('variables.value_source')"
+      >
+        <el-radio-group v-model="pageForm.value_type" :disabled="!!pageForm.id">
+          <el-radio value="fixed">{{ $t('variables.fixed_value') }}</el-radio>
+          <el-radio value="user_attr">{{ $t('variables.user_attr') }}</el-radio>
+        </el-radio-group>
+      </el-form-item>
+
+      <!-- user_attr: 单个 key 输入框 -->
+      <el-form-item
+        v-if="pageForm.value_type === 'user_attr' && (pageForm.var_type === 'text' || pageForm.var_type === 'list')"
+        prop="value"
+        :label="$t('variables.attr_key')"
+      >
+        <el-input
+          v-model="pageForm.value[0]"
+          :placeholder="$t('variables.attr_key_placeholder')"
+          :disabled="!!pageForm.id"
+          autocomplete="off"
+          maxlength="100"
+          clearable
+        />
+        <div style="font-size: 12px; color: #8a8f99; margin-top: 4px">
+          {{ $t('variables.attr_key_hint') }}
+        </div>
+      </el-form-item>
+
+      <!-- user_attr + list: 匹配模式 -->
+      <el-form-item
+        v-if="pageForm.value_type === 'user_attr' && pageForm.var_type === 'list'"
+        :label="$t('variables.match_mode')"
+      >
+        <el-radio-group v-model="pageForm.match_mode">
+          <el-radio value="in">{{ $t('variables.match_mode_in') }}</el-radio>
+          <el-radio value="like">{{ $t('variables.match_mode_like') }}</el-radio>
+        </el-radio-group>
+        <div style="font-size: 12px; color: #8a8f99; margin-top: 4px">
+          {{ pageForm.match_mode === 'like' ? $t('variables.match_mode_like_hint') : $t('variables.match_mode_in_hint') }}
+        </div>
+      </el-form-item>
+
+      <el-form-item v-else-if="pageForm.var_type === 'text' || pageForm.var_type === 'list'">
         <template #label>
           <div style="display: flex; align-items: center; height: 22px">
             <span class="text">{{ t('variables.variable_value') }}</span>

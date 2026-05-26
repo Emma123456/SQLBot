@@ -16,5 +16,7 @@ class SystemVariable(SQLModel, table=True):
     var_type: str = Field(max_length=128, nullable=False)
     type: str = Field(max_length=128, nullable=False)
     value: List = Field(sa_column=Column(JSONB, nullable=True))
+    value_type: str = Field(default='fixed', max_length=64, nullable=True)
+    match_mode: str = Field(default='in', max_length=64, nullable=True)
     create_time: datetime = Field(sa_column=Column(DateTime(timezone=False), nullable=True))
     create_by: int = Field(sa_column=Column(BigInteger()))

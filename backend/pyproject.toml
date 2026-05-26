@@ -24,14 +24,15 @@ dependencies = [
     "langchain-openai>=0.3,<0.4",
     "langchain-community>=0.3,<0.4",
     "langchain-huggingface>=0.2.0",
-    "sentence-transformers>=4.0.2",
+    "sentence-transformers>=2.7.0,<3.0.0; platform_system == 'Darwin' and platform_machine == 'x86_64'",
+    "sentence-transformers>=4.0.2; platform_system != 'Darwin' or platform_machine == 'arm64'",
     "langgraph>=0.3,<0.4",
     "pgvector>=0.4.1",
     "dashscope>=1.14.0,<2.0.0",
     "pymysql (>=1.1.1,<2.0.0)",
     "cryptography (>=44.0.3,<45.0.0)",
     "llama_index>=0.12.35",
-    "pymssql (>=2.3.4,<3.0.0)",
+    "pymssql (>=2.3.4,<3.0.0); platform_system != 'Darwin'",
     "pandas (>=2.2.3,<3.0.0)",
     "openpyxl (>=3.1.5,<4.0.0)",
     "psycopg2-binary (>=2.9.10,<3.0.0)",
@@ -63,7 +64,7 @@ cpu = [
     "torch>=2.7.0",
 ]
 cu128 = [
-    "torch>=2.7.0",
+    "torch>=2.7.0; platform_system != 'Darwin'",
 ]
 
 [[tool.uv.index]]
@@ -99,6 +100,9 @@ conflicts = [
         { extra = "cpu" },
         { extra = "cu128" },
     ],
+]
+override-dependencies = [
+    "torch>=2.0.0,<2.3.0",
 ]
 dev-dependencies = [
     "pytest<8.0.0,>=7.4.3",
@@ -150,3 +154,4 @@ ignore = [
 [tool.ruff.lint.pyupgrade]
 # Preserve types, even if a file imports `from __future__ import annotations`.
 keep-runtime-typing = true
+

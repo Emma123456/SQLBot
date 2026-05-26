@@ -419,9 +419,37 @@
             >
               <el-option v-for="item in []" :key="item" :label="item" :value="item"> </el-option>
             </el-select>
+            <el-input
+              v-else-if="
+                (variableValueMap[state.form.system_variables[index].variableId].var_type === 'text' ||
+                  variableValueMap[state.form.system_variables[index].variableId].var_type === 'list') &&
+                variableValueMap[state.form.system_variables[index].variableId].value_type === 'user_attr'
+              "
+              style="width: 236px"
+              :model-value="$t('variables.auto_from_user_attr')"
+              disabled
+            />
             <el-select
               v-else-if="
                 variableValueMap[state.form.system_variables[index].variableId].var_type === 'text'
+              "
+              v-model="state.form.system_variables[index].variableValues"
+              multiple
+              style="width: 236px"
+              :placeholder="$t('datasource.Please_select')"
+            >
+              <el-option
+                v-for="item in variableValueMap[state.form.system_variables[index].variableId]
+                  .value"
+                :key="item"
+                :label="item"
+                :value="item"
+              >
+              </el-option>
+            </el-select>
+            <el-select
+              v-else-if="
+                variableValueMap[state.form.system_variables[index].variableId].var_type === 'list'
               "
               v-model="state.form.system_variables[index].variableValues"
               multiple
@@ -472,6 +500,49 @@
       </el-form-item>
       <el-form-item :label="$t('user.user_status')">
         <el-switch v-model="state.form.status" :active-value="1" :inactive-value="0" />
+      </el-form-item>
+
+      <el-form-item>
+        <template #label>
+          <div style="display: flex; align-items: center; height: 22px">
+            <span>{{ $t('user.ext_attrs') }}</span>
+            <span class="btn" @click="extAttrs.push({ key: '', value: '' })">
+              <el-icon style="margin-right: 4px" size="16">
+                <icon_add_outlined></icon_add_outlined>
+              </el-icon>
+              {{ $t('model.add') }}
+            </span>
+          </div>
+        </template>
+        <div v-if="extAttrs.length" class="value-list">
+          <div class="title">
+            <span style="width: calc(48% - 2px)">{{ $t('user.attr_key') }}</span>
+            <span>{{ $t('user.attr_value') }}</span>
+          </div>
+          <div v-for="(_, index) in extAttrs" :key="index" class="item">
+            <el-input
+              v-model="extAttrs[index].key"
+              style="width: 236px"
+              :placeholder="$t('user.attr_key_placeholder')"
+              autocomplete="off"
+              maxlength="100"
+              clearable
+            />
+            <el-input
+              v-model="extAttrs[index].value"
+              style="width: 236px"
+              :placeholder="$t('user.attr_value_placeholder')"
+              autocomplete="off"
+              maxlength="200"
+              clearable
+            />
+            <el-tooltip :offset="14" effect="dark" :content="$t('dashboard.delete')" placement="top">
+              <el-icon class="action-btn" size="16" @click="extAttrs.splice(index, 1)">
+                <IconOpeDelete></IconOpeDelete>
+              </el-icon>
+            </el-tooltip>
+          </div>
+        </div>
       </el-form-item>
     </el-form>
     <template #footer>
@@ -639,6 +710,8 @@ const defaultForm = {
   oid_list: [],
   system_variables: [],
 }
+
+const extAttrs = ref<{ key: string; value: string }[]>([])
 const options = ref<any[]>([])
 const variables = shallowRef<any[]>([])
 const variableValueMap = shallowRef<any>({})
@@ -895,26 +968,32 @@ const editHandler = (row: any) => {
         pre[next.id] = {
           value: next.value,
           var_type: next.var_type,
+          value_type: next.value_type || 'fixed',
           name: next.name,
         }
         return pre
       }, {})
 
       if (row) {
+        const rawVars = row.system_variables || []
+        extAttrs.value = rawVars.filter((e: any) => 'key' in e && !('variableId' in e))
         state.form = {
           ...row,
-          system_variables: (row.system_variables || []).map((ele: any) => ({
-            ...ele,
-            variableValue: ele.variableValues[0],
-          })),
+          system_variables: rawVars
+            .filter((e: any) => 'variableId' in e)
+            .map((ele: any) => ({
+              ...ele,
+              variableValue: ele.variableValues[0],
+            })),
         }
       }
     })
     .finally(() => {
       state.form.system_variables = state.form.system_variables.filter((ele: any) => {
         if (variableValueMap.value[ele.variableId]) {
-          if (variableValueMap.value[ele.variableId].var_type === 'text') {
-            ele.variableValues = variableValueMap.value[ele.variableId].value.filter(
+          const varMeta = variableValueMap.value[ele.variableId]
+          if ((varMeta.var_type === 'text' || varMeta.var_type === 'list') && varMeta.value_type !== 'user_attr') {
+            ele.variableValues = varMeta.value.filter(
               (item: any) => ele.variableValues.indexOf(item) > -1
             )
             return !!ele.variableValues.length
@@ -986,6 +1065,7 @@ const closeForm = () => {
 }
 const onFormClose = () => {
   state.form = { ...defaultForm }
+  extAttrs.value = []
   dialogFormVisible.value = false
 }
 
@@ -1025,13 +1105,22 @@ const search = () => {
 }
 
 const formatVariableValues = () => {
-  if (!state.form.system_variables?.length) return []
-  return state.form.system_variables.map((ele: any) => ({
-    variableId: ele.variableId,
-    variableValues: ['number', 'datetime'].includes(variableValueMap.value[ele.variableId].var_type)
-      ? [ele.variableValue]
-      : ele.variableValues,
-  }))
+  const varBindings = (state.form.system_variables || []).map((ele: any) => {
+    const varMeta = variableValueMap.value[ele.variableId]
+    if (varMeta.value_type === 'user_attr') {
+      return { variableId: ele.variableId, variableValues: [] }
+    }
+    return {
+      variableId: ele.variableId,
+      variableValues: ['number', 'datetime'].includes(varMeta.var_type)
+        ? [ele.variableValue]
+        : ele.variableValues,
+    }
+  })
+  const attrs = extAttrs.value
+    .filter((a) => a.key.trim())
+    .map((a) => ({ key: a.key.trim(), value: a.value }))
+  return [...varBindings, ...attrs]
 }
 
 const addTerm = () => {
@@ -1089,6 +1178,7 @@ const validateSystemVariables = () => {
   if (system_variables?.length) {
     return system_variables.some((ele: any) => {
       const obj = variableValueMap.value[ele.variableId]
+      if (obj.value_type === 'user_attr') return false
       if (obj.var_type === 'text' && !ele.variableValues.length) {
         ElMessage.error(t('variables.​​cannot_be_empty'))
         return true

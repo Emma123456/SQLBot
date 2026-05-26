@@ -75,14 +75,45 @@ def transTreeItem(session: SessionDep, current_user: CurrentUser, item: Dict, ds
 
                 # do inner system variable
                 if sys_variable.type == 'system':
-                    res = whereName + whereTerm + getSysVariableValue(sys_variable, current_user, ds, field, item)
-                else:
-                    # check user variable
-                    user_variables = current_user.system_variables
-                    if user_variables is None or len(user_variables) == 0 or not userHaveVariable(user_variables,
-                                                                                                  sys_variable):
+                    sys_val = getSysVariableValue(sys_variable, current_user, ds, field, item)
+                    if sys_val is None:
                         return None
+                    res = whereName + whereTerm + sys_val
+                else:
+                    # user_attr: value comes from user's extended attributes, no binding needed
+                    if getattr(sys_variable, 'value_type', None) == 'user_attr':
+                        if sys_variable.var_type == 'list':
+                            # list + user_attr: split comma-separated value
+                            key = sys_variable.value[0]
+                            user_sys_vars = current_user.system_variables or []
+                            raw = next((x.get('value') for x in user_sys_vars if x.get('key') == key), None)
+                            if not raw:
+                                return None
+                            values = [v.strip() for v in str(raw).split(',') if v.strip()]
+                            if not values:
+                                return None
+                            is_nvarchar = ds.type == 'sqlServer' and field.field_type.lower() in ('nchar', 'nvarchar')
+                            q = "N'" if is_nvarchar else "'"
+                            match_mode = getattr(sys_variable, 'match_mode', 'in') or 'in'
+                            if match_mode == 'like':
+                                # each value as a LIKE clause, joined with OR
+                                like_clauses = [f"{whereName} LIKE {q}%{v}%'" for v in values]
+                                res = "(" + " OR ".join(like_clauses) + ")"
+                            else:
+                                whereValue = "(" + ", ".join(f"{q}{v}'" for v in values) + ")"
+                                res = whereName + " IN " + whereValue
+                        else:
+                            sys_val = getSysVariableValue(sys_variable, current_user, ds, field, item)
+                            if sys_val is None:
+                                return None
+                            res = whereName + whereTerm + sys_val
                     else:
+                        # check user variable
+                        user_variables = current_user.system_variables
+                        if user_variables is None or len(user_variables) == 0 or not userHaveVariable(user_variables,
+                                                                                                      sys_variable):
+                            return None
+
                         # get user variable
                         u_variable = None
                         for u in user_variables:
@@ -94,7 +125,18 @@ def transTreeItem(session: SessionDep, current_user: CurrentUser, item: Dict, ds
 
                         # check value
                         values = u_variable.get('variableValues')
-                        if sys_variable.var_type == 'text':
+                        if sys_variable.var_type == 'list':
+                            # list type: filter against candidate set, force IN clause
+                            set_sys = set(sys_variable.value)
+                            values = [x for x in (values or []) if x in set_sys]
+                            if not values:
+                                return None
+                            is_nvarchar = ds.type == 'sqlServer' and field.field_type.lower() in ('nchar', 'nvarchar')
+                            q = "N'" if is_nvarchar else "'"
+                            whereValue = "(" + ", ".join(f"{q}{v}'" for v in values) + ")"
+                            res = whereName + " IN " + whereValue
+                            return res
+                        elif sys_variable.var_type == 'text':
                             set_sys = set(sys_variable.value)
                             values = [x for x in values if x in set_sys]
                             if values is None or len(values) == 0:
@@ -219,12 +261,19 @@ def userHaveVariable(user_variables: List, sys_variable: SystemVariable):
 def getSysVariableValue(sys_variable: SystemVariable, current_user: CurrentUser, ds: CoreDatasource, field: CoreField,
                         item: Dict, ):
     v = None
-    if sys_variable.value[0] == 'name':
+    if getattr(sys_variable, 'value_type', None) == 'user_attr':
+        key = sys_variable.value[0]
+        user_sys_vars = current_user.system_variables or []
+        v = next((x.get('value') for x in user_sys_vars if x.get('key') == key), None)
+    elif sys_variable.value[0] == 'name':
         v = current_user.name
-    if sys_variable.value[0] == 'account':
+    elif sys_variable.value[0] == 'account':
         v = current_user.account
-    if sys_variable.value[0] == 'email':
+    elif sys_variable.value[0] == 'email':
         v = current_user.email
+
+    if v is None:
+        return None
 
     whereValue = ''
     if item['term'] == 'null':

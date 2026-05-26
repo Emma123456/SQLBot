@@ -10,7 +10,9 @@ from typing import Optional, List
 
 import oracledb
 import psycopg2
-import pymssql
+
+if platform.system() != "Darwin":
+    import pymssql
 
 from apps.db.db_sql import get_table_sql, get_field_sql, get_version_sql
 from common.error import ParseSQLResultError

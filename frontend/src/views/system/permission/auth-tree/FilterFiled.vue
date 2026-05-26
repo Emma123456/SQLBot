@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import icon_deleteTrash_outlined from '@/assets/svg/icon_delete.svg'
-import { ref, inject, computed, onBeforeMount, toRefs, type Ref, shallowRef } from 'vue'
+import { ref, inject, computed, onBeforeMount, toRefs, watch, type Ref, shallowRef } from 'vue'
 import { variablesApi } from '@/api/variables'
 import { useI18n } from 'vue-i18n'
 import { allOptions } from '../options'
@@ -23,6 +23,8 @@ export interface sysVariable {
   label: string
   value: string
   type: string
+  var_type?: string
+  value_type?: string
 }
 
 type Props = {
@@ -74,6 +76,35 @@ const computedWidth = computed(() => {
 
 const operators = computed(() => {
   return allOptions
+})
+
+// The currently selected variable object
+const selectedVariable = computed(() => {
+  if (item.value.value_type !== 'variable' || !item.value.variable_id) return null
+  return variables.value.find((v: any) => v.id === item.value.variable_id) || null
+})
+
+// For list-type variables, only allow IN / NOT IN operators
+const availableOperators = computed(() => {
+  if (selectedVariable.value?.var_type === 'list') {
+    const mode = selectedVariable.value?.match_mode || 'in'
+    if (mode === 'like') {
+      return allOptions.filter((o) => o.value === 'like' || o.value === 'not like')
+    }
+    return allOptions.filter((o) => o.value === 'in' || o.value === 'not in')
+  }
+  return allOptions
+})
+
+// Auto-lock term when a list variable is selected
+watch(selectedVariable, (v) => {
+  if (v?.var_type === 'list') {
+    const mode = v?.match_mode || 'in'
+    const allowed = mode === 'like' ? ['like', 'not like'] : ['in', 'not in']
+    if (!allowed.includes(item.value.term)) {
+      item.value.term = allowed[0]
+    }
+  }
 })
 
 const computedFiledList = computed<any[]>(() => {
@@ -207,7 +238,7 @@ const emits = defineEmits(['update:item', 'del'])
           :placeholder="t('datasource.Please_select')"
         >
           <el-option
-            v-for="ele in operators"
+            v-for="ele in availableOperators"
             :key="ele.value"
             :label="t(ele.label)"
             :value="ele.value"
@@ -229,7 +260,7 @@ const emits = defineEmits(['update:item', 'del'])
               :placeholder="t('datasource.Please_select')"
             >
               <el-option
-                v-for="ele in operators"
+                v-for="ele in availableOperators"
                 :key="ele.value"
                 :label="t(ele.label)"
                 :value="ele.value"
@@ -245,7 +276,7 @@ const emits = defineEmits(['update:item', 'del'])
             :placeholder="t('datasource.Please_select')"
           >
             <el-option
-              v-for="ele in operators"
+              v-for="ele in availableOperators"
               :key="ele.value"
               :label="t(ele.label)"
               :value="ele.value"
@@ -266,6 +297,14 @@ const emits = defineEmits(['update:item', 'del'])
               </div>
             </el-option>
           </el-select>
+          <el-tag
+            v-if="selectedVariable?.value_type === 'user_attr'"
+            type="info"
+            size="small"
+            style="margin-left: 6px"
+          >
+            {{ $t('variables.user_attr') }}
+          </el-tag>
         </template>
       </template>
       <el-icon v-if="showDel" class="font16" @click="emits('del')">
