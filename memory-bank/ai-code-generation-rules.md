@@ -356,6 +356,124 @@ onMounted(() => {
 </script>
 ```
 
+## 经验教训（Phase 1-2 实战总结）
+
+### 1. 前端 Element Plus 组件导入规则（严重 Bug 教训）
+
+**禁止使用** `window` 全局变量回退模式导入 Element Plus 组件：
+
+```typescript
+// ❌ 严禁：window 回退模式 — 导致静默运行时故障
+const ElMessage = (window as any).ElMessage || (() => {})
+const ElMessageBox = (window as any).ElMessageBox || { confirm: () => Promise.reject() }
+
+// ✅ 正确：从 element-plus-secondary 导入
+import { ElMessage, ElMessageBox } from 'element-plus-secondary'
+```
+
+**原因**：`window.ElMessage` 在 SQLBot 运行时为 `undefined`，回退函数 `(() => {})` 没有 `.success()` 方法，
+调用 `ElMessage.success()` 会抛出 TypeError，被 try-catch 静默捕获，导致后续逻辑（对话框关闭、树刷新）被跳过。
+用户看到的现象：对话框不关闭、树不刷新、无提示消息 — 但编译无任何错误。
+
+**所有 Element Plus 组件均需从 `element-plus-secondary` 导入**：
+- `ElMessage`, `ElMessageBox`, `ElLoading`
+- `ElButton`, `ElForm`, `ElTable` 等
+- 类型：`FormInstance`, `FormRules`, `CheckboxValueType` 等
+
+### 2. TypeScript TS6133 错误处理规则
+
+- **下划线前缀（`_operators`）不能抑制 TS6133**，必须完全删除未使用的变量或导入
+- 生成代码前检查所有导入是否实际使用
+- 生成代码后运行 `vue-tsc --noEmit` 验证零错误
+
+### 3. SVG 图标导入
+
+```typescript
+// SVG 导入会产生 TS 模块声明警告，但这是项目预存问题
+// Vite 构建时会正确处理，不影响编译和运行
+import IconName from '@/assets/svg/icon_name.svg'
+```
+
+### 4. SQLBot 后端 API 端点标准模式
+
+```python
+# api/{feature}.py 标准模式
+from fastapi import APIRouter
+from apps.system.crud.{feature} import create_xxx, get_xxx, ...
+from apps.system.schemas.system_schema import XxxCreate, XxxUpdate
+from common.core.deps import CurrentUser, SessionDep
+
+router = APIRouter(tags=["system_{feature}"], prefix="/system/{feature}")
+
+# 读取端点无需管理员保护
+@router.get("/list")
+async def list_items(session: SessionDep, current_user: CurrentUser):
+    return get_all_items(session)
+
+# 写入端点必须检查管理员权限
+@router.post("")
+async def create_item(session: SessionDep, current_user: CurrentUser, dto: XxxCreate):
+    if not current_user.isAdmin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    return create_xxx(session, dto)
+```
+
+**注册路由**：在 `apps/api.py` 中导入并注册
+```python
+from apps.system.api import {feature}
+api_router.include_router({feature}.router)
+```
+
+### 5. SQLBot 前端页面标准模式
+
+```
+frontend/src/
+  api/{feature}.ts          # API 客户端（typed interfaces + request 封装）
+  views/system/{feature}/index.vue  # 管理页面
+  router/index.ts           # 添加路由
+  i18n/{locale}.json        # 三语翻译（zh-CN, en, zh-TW）
+```
+
+### 6. 编译通过 ≠ 运行正常（必须 E2E 测试）
+
+| 检查方式 | 能发现的问题 | 不能发现的问题 |
+|---------|------------|-------------|
+| `vue-tsc` | 类型错误、未使用变量 | 运行时静默故障（如 ElMessage 回退） |
+| Python import | 导入错误 | 循环导入（仅服务器启动时暴露） |
+| Alembic migrate | 表结构创建 | 约束逻辑错误 |
+| **浏览器 E2E 测试** | **以上所有** | — |
+
+**最低测试清单**：
+- [ ] `vue-tsc --noEmit` 零错误
+- [ ] 后端服务器启动无导入错误
+- [ ] 前端 dev 服务器启动无 TS 错误
+- [ ] 浏览器 E2E：导航到页面，执行所有 CRUD 操作
+- [ ] 验证对话框关闭、列表刷新、成功/错误消息显示
+
+### 7. 数据库模型冗余字段刷新模式
+
+当关联表（如 `sys_user_role`、`sys_user_dept`）变更时，必须刷新父模型上的冗余 JSONB 字段（如 `role_ids`、`dept_ids`）：
+
+```python
+# apps/system/crud/user_role_dept.py
+# 调用者负责 session.commit()
+def refresh_user_role_ids(session: Session, uid: int) -> None:
+    stmt = select(SysUserRole.role_id).where(SysUserRole.uid == uid)
+    role_ids = list(session.exec(stmt).all())
+    user = session.get(UserModel, uid)
+    if user:
+        user.role_ids = role_ids
+        session.add(user)
+```
+
+### 8. Alembic 迁移链接规则
+
+- 迁移文件必须正确设置 `down_revision` 链接到上一个迁移
+- 使用 `alembic current` 确认当前版本后再创建新迁移
+- 迁移后运行 `alembic upgrade head` 并验证
+
+---
+
 ## 最终说明
 
 - 这些规则应随着项目发展而更新
@@ -363,3 +481,4 @@ onMounted(() => {
 - 与现有代码库模式保持一致
 - 有疑问时，查阅设计文档和技术栈文件
 - 根据经验教训定期审查和完善这些指南
+- **新增经验教训必须同步更新本文件**
