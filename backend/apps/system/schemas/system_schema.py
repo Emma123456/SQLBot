@@ -102,6 +102,8 @@ class UserInfoDTO(UserEditor):
     language: str = "zh-CN"
     weight: int = 0
     isAdmin: bool = False
+    role_ids: list[int] = []
+    dept_ids: list[int] = []
 
 
 class AssistantBase(BaseModel):
@@ -223,3 +225,51 @@ class ApikeyGridItem(BaseCreatorDTO):
     secret_key: str = Field(description=f"Secret Key")
     status: bool = Field(description=f"{PLACEHOLDER_PREFIX}status")
     create_time: int = Field(description=f"{PLACEHOLDER_PREFIX}create_time")
+
+
+# Role DTOs
+class RoleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128, description="角色名称")
+    code: str = Field(min_length=1, max_length=128, description="角色编码")
+    description: Optional[str] = Field(default=None, max_length=512, description="描述")
+
+
+class RoleUpdate(BaseModel):
+    id: int = Field(description="角色ID")
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128, description="角色名称")
+    code: Optional[str] = Field(default=None, min_length=1, max_length=128, description="角色编码")
+    description: Optional[str] = Field(default=None, max_length=512, description="描述")
+
+
+class RoleResponse(BaseCreatorDTO):
+    name: str = Field(description="角色名称")
+    code: str = Field(description="角色编码")
+    description: Optional[str] = Field(description="描述")
+    origin: int = Field(description="来源")
+    create_time: int = Field(description="创建时间")
+
+
+# Department DTOs
+class DepartmentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128, description="部门名称")
+    code: str = Field(min_length=1, max_length=128, description="部门编码")
+    parent_id: int = Field(default=0, description="父部门ID")
+
+
+class DepartmentUpdate(BaseModel):
+    id: int = Field(description="部门ID")
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128, description="部门名称")
+    code: Optional[str] = Field(default=None, min_length=1, max_length=128, description="部门编码")
+    parent_id: Optional[int] = Field(default=None, description="父部门ID")
+
+
+class DepartmentResponse(BaseCreatorDTO):
+    name: str = Field(description="部门名称")
+    code: str = Field(description="部门编码")
+    parent_id: int = Field(description="父部门ID")
+    origin: int = Field(description="来源")
+    create_time: int = Field(description="创建时间")
+
+
+class DepartmentTreeNode(DepartmentResponse):
+    children: Optional[list['DepartmentTreeNode']] = Field(default=[], description="子部门列表")

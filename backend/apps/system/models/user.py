@@ -24,6 +24,14 @@ class BaseUserPO(SQLModel):
         default=None,
         sa_column=Column(JSONB, nullable=True)
     )
+    role_ids: Optional[List] = Field(
+        default=[],
+        sa_column=Column(JSONB, nullable=True)
+    )
+    dept_ids: Optional[List] = Field(
+        default=[],
+        sa_column=Column(JSONB, nullable=True)
+    )
 
 
 class UserModel(SnowflakeBase, BaseUserPO, table=True):
