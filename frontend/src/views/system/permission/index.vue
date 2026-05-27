@@ -329,11 +329,14 @@ const handleSearch = () => {
   // Also load all rule targets for Card display
   getAllRuleTargets()
     .then((res: any) => {
-      const map: Record<number, { roles: number[]; departments: number[] }> = {}
+      const map: Record<string, { roles: string[]; departments: string[] }> = {}
       // API returns { rules: [...] } or array
       const rules = Array.isArray(res) ? res : (res?.rules || [])
       for (const item of rules) {
-        map[String(item.rule_id)] = { roles: item.roles || [], departments: item.departments || [] }
+        map[String(item.rule_id)] = {
+          roles: (item.roles || []).map((r: any) => String(r)),
+          departments: (item.departments || []).map((d: any) => String(d)),
+        }
       }
       ruleTargetsMap.value = map
     })

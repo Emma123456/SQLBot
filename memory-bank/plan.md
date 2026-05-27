@@ -924,82 +924,284 @@
 
 ---
 
-## 第七阶段：外部同步（可选，可后续实现）
+## 第七阶段：外部数据库同步
 
-> 此阶段为扩展功能，可在核心功能完成后实施。
+> 从外部关系型数据库（MySQL）同步用户、部门、角色及关联关系到 SQLBot。
 
-### 步骤 7.1：创建同步适配器基类
+### 步骤 7.1：创建同步模型文件
 
-**文件路径**：`backend/apps/system/sync/adapter.py`
+**文件路径**：`backend/apps/system/models/sync_model.py`
 
 **指令**：
-1. 创建 `sync` 目录（如果不存在）
-2. 创建 `adapter.py`，定义 `SyncAdapter` 抽象类和 Pydantic 数据模型
-3. 抽象方法：`get_departments()`、`get_roles()`、`get_users()`、`get_user_roles()`、`get_user_departments()`
-4. 数据模型：`SyncDepartment(code, name, parent_code)`、`SyncRole(code, name)`、`SyncUser(code, name, email, role_codes, dept_codes)`、`SyncUserRole(user_code, role_code)`、`SyncUserDept(user_code, dept_code, is_primary)`
+1. 创建新文件 `sync_model.py`
+2. 导入 SQLModel、Field、BigInteger、Identity、Column、Text、JSONB 相关依赖
+3. 定义 `SyncDatasource` 模型类，继承 SQLModel 和表模型
+4. 配置表名为 `sync_datasource`，主键使用 `Identity(always=True)` 自增
+5. 定义字段：`name`（varchar 128）、`db_type`（varchar 32，默认 `mysql`）、`host`（varchar 255）、`port`（int，默认 3306）、`username`（varchar 255）、`password`（Text，AES 加密存储）、`database`（varchar 255）、`db_schema`（varchar 128）、`enabled`（boolean，默认 True）、`cron_expression`（varchar 64，默认空串）、`create_time`（BigInteger）
+6. 定义 `SyncTableMapping` 模型类，表名 `sync_table_mapping`，主键自增
+7. 定义字段：`ds_id`（BigInteger，外键 → sync_datasource.id）、`entity_type`（varchar 32）、`table_name`（varchar 128）、`enabled`（boolean，默认 True）
+8. 定义 `SyncLog` 模型类，表名 `sync_log`，主键自增
+9. 定义字段：`ds_id`（BigInteger）、`status`（varchar 16）、`summary`（JSONB）、`error_message`（Text，可为空）、`start_time`（BigInteger）、`end_time`（BigInteger，可为空）
+10. 创建 Pydantic DTO：`SyncDatasourceCreate`、`SyncDatasourceUpdate`、`SyncTableMappingUpdate`、`SyncScheduleUpdate`（cron_expression）
 
 **验证测试**：
-- 导入 `SyncAdapter`，尝试实例化（应失败）
-- 创建子类实现所有方法，实例化成功
+- 导入 `SyncDatasource`、`SyncTableMapping`、`SyncLog` 类
+- 验证实例化成功且字段默认值正确
+- 验证 DTO 类可正确序列化
 
 ---
 
-### 步骤 7.2：实现钉钉同步适配器（示例）
 
-**文件路径**：`backend/apps/system/sync/dingtalk.py`
+### 步骤 7.2：实现同步引擎
+
+**文件路径**：`backend/apps/system/crud/sync_engine.py`
 
 **指令**：
-1. 创建 `DingTalkAdapter` 类，继承 `SyncAdapter`
-2. 实现 `__init__()`：接受钉钉 API 凭据，初始化 HTTP 客户端，获取 token
-3. 实现各抽象方法：调用钉钉 API → 解析响应 → 映射到标准化模型
-
-> 注意：此步骤需要钉钉开放平台 API 文档。
+1. 创建新文件 `sync_engine.py`
+2. 导入 `sqlalchemy.create_engine`、`text`、Session 相关依赖
+3. 导入 `SyncDatasource`、`SyncTableMapping`、`SyncLog` 模型
+4. 导入 `SysUser`、`SysRole`、`SysDepartment`、`SysUserRole`、`SysUserDept`、`UserPlatformModel` 模型
+5. 导入 `refresh_user_role_ids`、`refresh_user_dept_ids` 刷新函数
+6. 实现 `get_external_engine(conf: SyncDatasource)` 函数：
+   - 根据 `db_type` 构造数据库连接 URI（MySQL: `mysql+pymysql://...`）
+   - 调用 `create_engine()` 返回引擎
+7. 实现 `read_external_table(engine, table_name: str)` 函数：
+   - 使用 `engine.connect()` + `text(f"SELECT * FROM {table_name}")` 执行查询
+   - 返回行数据列表（每行为 dict）
+8. 实现 `upsert_departments(session, ext_rows, origin=4)` 函数：
+   - 遍历外部部门数据，按 `code` 查找 `SysDepartment`
+   - 不存在：创建新部门（生成雪花 ID，设置 `origin=4`）
+   - 已存在：更新 `name`，通过 `parent_code` 查找内部 parent_id 并更新
+   - 返回 `{code: internal_id}` 映射表和新建/更新计数
+9. 实现 `upsert_roles(session, ext_rows, origin=4)` 函数：
+   - 逻辑同部门，按 `code` 匹配
+   - 返回 `{code: internal_id}` 映射表和计数
+10. 实现 `upsert_users(session, ext_rows, origin=4)` 函数：
+    - 遍历外部用户数据，通过 `sys_user_platform.platform_uid` 查找已存在用户
+    - 不存在：创建用户（雪花 ID）+ 创建 `UserPlatformModel(uid=新ID, platform_uid=外部id, origin=4)`
+    - 已存在：更新 `name`、`email`
+    - 返回 `{platform_uid: internal_id}` 映射表和计数
+11. 实现 `sync_user_departments(session, ext_rows, user_map, dept_map)` 函数：
+    - 遍历外部 user_dept 数据
+    - 通过 `user_map[外部user_id]` 和 `dept_map[外部dept_code]` 获取内部 ID
+    - 清除受影响用户的 `SysUserDept` 记录，插入新映射
+    - 刷新受影响用户的 `dept_ids`
+12. 实现 `sync_user_roles(session, ext_rows, user_map, role_map)` 函数：
+    - 逻辑同 user_dept
+    - 刷新受影响用户的 `role_ids`
+13. 实现 `mark_inactive(session, entity_type, active_codes, origin=4)` 函数：
+    - 查找 `origin=4` 且 code 不在 `active_codes` 中的实体
+    - 设置 `status=9`（已失效）
+    - 返回失效计数
+14. 实现 `run_sync(session, ds_id: int)` 主函数：
+    - 从数据库读取 `SyncDatasource` 和 `SyncTableMapping` 配置
+    - 创建外部数据库引擎
+    - 按顺序调用：upsert_departments → upsert_roles → upsert_users → sync_user_departments → sync_user_roles → mark_inactive
+    - 写入 `sync_log`（status=success/failed，summary 记录计数）
+    - 返回同步摘要
 
 **验证测试**：
-- 使用钉钉测试凭据，验证各方法返回正确数据
+- 准备外部 MySQL 数据库，创建测试表（t_user、t_dept、t_role、t_dept_user、t_role_user）
+- 调用 `run_sync()`，验证数据正确同步到 SQLBot
+- 验证 `sys_user_platform` 记录正确创建
+- 验证 `sys_user.role_ids` 和 `sys_user.dept_ids` 冗余字段正确刷新
+- 再次调用 `run_sync()`（幂等性），验证无重复创建，ID 不变
+- 修改外部数据后再次同步，验证更新成功
+- 删除外部某条记录后同步，验证 SQLBot 中 status=9
 
 ---
 
-### 步骤 7.3：创建同步 API 端点
+### 步骤 7.3：创建同步 REST API
 
 **文件路径**：`backend/apps/system/api/sync.py`
 
 **指令**：
-1. 创建路由器：`router = APIRouter(prefix="/sync", tags=["sync"])`
-2. 实现各 `POST /sync/{origin}/...` 端点：users、roles、departments、user-roles、user-departments
-3. 每个端点执行 upsert 逻辑（按 `code` 匹配）
-4. 同步完成后刷新受影响用户的冗余字段
+1. 创建新文件 `sync.py`
+2. 创建路由器：`router = APIRouter(prefix="/sync", tags=["sync"])`
+3. 实现 `GET /sync/datasource` 端点：返回同步数据源列表
+4. 实现 `POST /sync/datasource` 端点：接受 `SyncDatasourceCreate`，创建数据源（密码 AES 加密），admin 权限
+5. 实现 `PUT /sync/datasource` 端点：接受 `SyncDatasourceUpdate`，更新数据源，admin 权限
+6. 实现 `DELETE /sync/datasource/{id}` 端点：删除数据源及关联映射，admin 权限
+7. 实现 `POST /sync/datasource/{id}/test` 端点：尝试连接外部数据库，返回成功/失败
+8. 实现 `GET /sync/datasource/{id}/mapping` 端点：返回 5 种 entity_type 的表映射配置
+9. 实现 `PUT /sync/datasource/{id}/mapping` 端点：接受 5 个映射配置，upert 到 `sync_table_mapping`
+10. 实现 `POST /sync/datasource/{id}/execute` 端点：调用 `run_sync()`，返回同步摘要
+11. 实现 `GET /sync/datasource/{id}/logs` 端点：分页返回同步日志
+12. 实现 `PUT /sync/datasource/{id}/schedule` 端点：接受 cron_expression，更新数据源并动态更新 scheduler
+13. 所有写入端点需要 admin 权限
 
 **验证测试**：
-- 发送同步请求，验证数据正确创建/更新
-- 验证冗余字段已刷新
-- 测试重复同步，验证幂等性
+- 启动后端服务器
+- 使用 curl/Postman 创建同步数据源
+- 测试连接成功/失败
+- 配置表映射
+- 执行同步，验证返回摘要
+- 获取同步日志
+- 设置定时同步
 
 ---
 
-### 步骤 7.4：扩展前端同步 UI
+### 步骤 7.4：注册同步路由
 
-**文件路径**：`frontend/src/views/system/user/SyncUserDing.vue`
+**文件路径**：`backend/apps/api.py`
 
 **指令**：
-1. 将现有用户同步功能改造为 `el-tabs`：用户同步、部门同步、角色同步
-2. 各 Tab 提供同步选项和"开始同步"按钮
-3. 同步完成后显示结果摘要
+1. 打开 `api.py` 文件
+2. 添加导入：`from apps.system.api.sync import router as sync_router`
+3. 注册路由：`app.include_router(sync_router, prefix="/api")`
+4. 确保无路由冲突
 
 **验证测试**：
-- 打开同步对话框，验证三个 Tab
-- 各 Tab 同步功能正常
-- 同步后部门/角色管理页面显示同步的数据
+- 重启后端服务器
+- 访问 Swagger 文档，验证 `/api/sync` 相关端点出现
+- 调用任意端点，确认路由正确注册
 
 ---
 
-**第七阶段验收检查点 — 外部同步测试**：
-- [ ] 同步适配器基类可正常继承和实例化
-- [ ] 钉钉适配器各方法返回正确数据
-- [ ] 同步 API 端点正确执行 upsert
-- [ ] 同步后冗余字段正确刷新
-- [ ] 前端同步 UI 三个 Tab 正常工作
-- [ ] 重复同步幂等
+### 步骤 7.5：APScheduler 集成
+
+**文件路径**：`backend/apps/system/sync/scheduler.py`
+
+**指令**：
+1. 创建 `sync` 目录（如果不存在）
+2. 创建 `scheduler.py`
+3. 导入 `APScheduler` 的 `AsyncIOScheduler`
+4. 创建全局 `scheduler = AsyncIOScheduler()`
+5. 实现 `init_scheduler()` 函数：
+   - 在 FastAPI startup event 中调用
+   - 查询所有 `enabled=True` 且 `cron_expression` 非空的 `SyncDatasource`
+   - 为每个数据源注册定时任务：`scheduler.add_job(run_sync_wrapper, "cron", **parse_cron(expr), id=f"sync_{ds_id}")`
+6. 实现 `update_schedule(ds_id, cron_expression)` 函数：
+   - 如果 cron_expression 非空：`scheduler.add_job(..., replace_existing=True)` 或 `scheduler.reschedule_job(...)`
+   - 如果 cron_expression 为空：`scheduler.remove_job(f"sync_{ds_id}")`
+7. 实现 `run_sync_wrapper(ds_id)` 函数：
+   - 创建数据库 Session
+   - 调用 `run_sync(session, ds_id)`
+   - 处理异常，写入 sync_log
+8. 实现 `parse_cron(expr: str)` 函数：
+   - 解析 cron 表达式为 APScheduler 参数 dict
+   - 支持 6 位 cron（秒 分 时 日 月 周）
+9. 在 `main.py` 中注册 startup event 调用 `init_scheduler()`
+
+**验证测试**：
+- 启动后端服务器，验证无导入错误
+- 创建同步数据源并设置 cron 表达式
+- 验证 scheduler 中注册了定时任务
+- 修改 cron 表达式，验证任务更新
+- 清空 cron 表达式，验证任务移除
+
+---
+
+### 步骤 7.6：创建同步 API 客户端
+
+**文件路径**：`frontend/src/api/sync.ts`
+
+**指令**：
+1. 创建新文件 `sync.ts`
+2. 导入 axios 实例或封装的请求方法
+3. 定义 TypeScript 接口：
+   - `SyncDatasource`：包含 id、name、db_type、host、port、username、password、database、db_schema、enabled、cron_expression、create_time
+   - `SyncTableMapping`：包含 id、ds_id、entity_type、table_name、enabled
+   - `SyncLog`：包含 id、ds_id、status、summary、error_message、start_time、end_time
+   - `SyncSummary`：包含 created、updated、deactivated
+4. 实现 API 函数：
+   - `getSyncDatasources()`: GET 请求
+   - `createSyncDatasource(data)`: POST 请求
+   - `updateSyncDatasource(data)`: PUT 请求
+   - `deleteSyncDatasource(id)`: DELETE 请求
+   - `testSyncDatasource(id)`: POST 请求
+   - `getSyncMappings(id)`: GET 请求
+   - `updateSyncMappings(id, data)`: PUT 请求
+   - `executeSync(id)`: POST 请求
+   - `getSyncLogs(id, params)`: GET 请求
+   - `updateSyncSchedule(id, cron)`: PUT 请求
+
+**验证测试**：
+- 在 Vue 组件中导入 API 函数
+- 调用各函数，验证能成功与后端通信
+- 检查 TypeScript 编译无错误
+
+---
+
+### 步骤 7.7：创建同步配置页面
+
+**文件路径**：`frontend/src/views/system/sync/index.vue`
+
+**指令**：
+1. 创建新文件 `index.vue`
+2. 使用 `<template>`、`<script setup lang="ts">`、`<style scoped>` 结构
+3. 在 `<template>` 中：
+   - 页面标题：“同步配置”
+   - 数据源卡片区域：每个数据源一张卡片，显示名称、类型、状态、定时规则
+   - 卡片操作：编辑、删除、立即同步、查看日志
+   - “新建数据源”按钮
+   - 编辑弹窗（`el-dialog`）：表单含 name、db_type（下拉）、host、port、username、password、database、db_schema
+   - 连接测试按钮
+   - 表映射配置区域（`el-form`）：5 行输入框，每行 entity_type 标签 + table_name 输入框 + enabled 开关
+   - 定时同步配置：cron 预设下拉（每30分钟/每1小时/每天/自定义）+ 自定义 cron 输入框
+   - 同步日志抽屉（`el-drawer`）：日志列表表格，包含时间、状态、摘要、错误信息
+   - 同步执行结果弹窗：显示 created/updated/deactivated 计数
+4. 在 `<script setup>` 中：
+   - 导入同步 API 函数
+   - 定义响应式数据
+   - 实现 `loadDatasources()` 函数
+   - 实现 `handleCreate()`、`handleEdit()`、`handleDelete()` 函数
+   - 实现 `handleTestConnection()` 函数
+   - 实现 `handleSave()` 函数（创建或更新数据源 + 保存表映射 + 保存定时规则）
+   - 实现 `handleSync()` 函数（调用 executeSync，显示结果摘要）
+   - 实现 `handleViewLogs()` 函数（打开日志抽屉）
+
+**验证测试**：
+- 在浏览器中访问同步配置页面
+- 创建 MySQL 数据源，测试连接成功
+- 配置表映射（5 个外部表名）
+- 点击“立即同步”，验证同步结果摘要显示正确
+- 验证用户管理、角色管理、部门管理页面显示同步的数据
+- 设置定时同步，验证 cron 表达式保存成功
+- 查看同步日志列表
+
+---
+
+### 步骤 7.8：添加同步配置路由和国际化
+
+**文件路径**：`frontend/src/router/` + `frontend/src/i18n/*.json`
+
+**指令**：
+1. 在路由配置文件中，系统管理路由下新增：
+   - 路径：`/system/sync`
+   - 组件：懒加载 `() => import('@/views/system/sync/index.vue')`
+   - 元信息：`{ title: '同步配置' }`
+2. 在 `zh-CN.json` 中添加同步配置相关键值对：
+   - `sync.title`: “同步配置”、`sync.create`: “新建数据源”、`sync.edit`: “编辑数据源”
+   - `sync.test_connection`: “测试连接”、`sync.connection_success`: “连接成功”、`sync.connection_failed`: “连接失败”
+   - `sync.table_mapping`: “表映射”、`sync.entity_type`: “实体类型”、`sync.table_name`: “外部表名”
+   - `sync.execute`: “立即同步”、`sync.sync_result`: “同步结果”
+   - `sync.created`: “新建”、`sync.updated`: “更新”、`sync.deactivated`: “失效”
+   - `sync.schedule`: “定时同步”、`sync.cron_expression`: “Cron 表达式”
+   - `sync.log`: “同步日志”、`sync.status`: “状态”
+   - `sync.db_type`: “数据库类型”、`sync.host`: “主机”、`sync.port`: “端口”
+3. 在 `en.json` 和 `zh-TW.json` 中添加对应翻译
+
+**验证测试**：
+- 访问 `/system/sync`，验证同步配置页面正确加载
+- 检查侧边栏菜单显示新路由
+- 切换语言，验证所有文本正确显示
+
+---
+
+**第七阶段验收检查点 — 外部数据库同步测试**：
+- [ ] 同步数据源 CRUD 功能正常
+- [ ] 连接测试正常（成功/失败）
+- [ ] 表映射配置保存和加载正常
+- [ ] 手动同步正确执行 upsert（用户、角色、部门、关联关系）
+- [ ] 同步后冗余字段（role_ids/dept_ids）正确刷新
+- [ ] ID 稳定性：重复同步后 snowflake ID 不变
+- [ ] 软删除：外部已删除的实体标记为 status=9
+- [ ] APScheduler 定时同步正常触发
+- [ ] 动态更新 cron 表达式后 scheduler 任务更新
+- [ ] 同步日志正确记录（成功/失败/摘要）
+- [ ] 前端同步配置页面完整可用
+- [ ] 国际化四语言完整
 
 ---
 
@@ -1066,10 +1268,20 @@
 ---
 
 **第八阶段验收检查点 — 国际化测试**：
-- [ ] 三种语言文件键名完全一致
-- [ ] 中文页面无硬编码文本
-- [ ] 英文页面无混合语言
-- [ ] 繁体中文页面用词正确
+- [x] 四种语言文件键名完全一致（zh-CN, en, zh-TW, ko-KR）
+- [x] 中文页面无硬编码文本
+- [x] 英文页面无混合语言
+- [x] 繁体中文页面用词正确
+- [x] 韩文页面包含角色/部门/权限相关翻译
+
+> **Phase 8 Status**: ✅ COMPLETED (2026-05-27)
+> - zh-CN, en, zh-TW: role/department/permission sections already complete from Phase 2-6
+> - ko-KR: Added `role` section (13 keys), `department` section (13 keys)
+> - ko-KR: Added `variables` extended keys (14 keys: list, value_source, user_attr, match_mode, etc.)
+> - ko-KR: Added `user` extended keys (5 keys: ext_attrs, attr_key, attr_value, etc.)
+> - Verified: All 4 locale files have consistent keys for role/department/permission/variables/user sections
+> - No hardcoded Chinese strings found in role/department/permission Vue components
+> - Note: sync.department, sync.role, common.manual, common.dingtalk, common.wechat, common.ldap keys deferred to Phase 7 (external sync) implementation
 
 ---
 

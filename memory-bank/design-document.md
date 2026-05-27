@@ -144,7 +144,8 @@ SQLBot 的行权限系统通过 `ds_rules` 表将权限规则分配给用户，`
 | `name` | varchar(128) | 角色名称（唯一） |
 | `code` | varchar(128) | 角色编码，用于外部同步映射（唯一） |
 | `description` | varchar(512) | 描述（可选） |
-| `origin` | int | 来源：0=手动, 1=钉钉, 2=企微, 3=LDAP |
+| `origin` | int | 来源：0=手动, 1=钉钉, 2=企微, 3=LDAP, 4=数据库同步 |
+| `status` | int | 状态：0=正常, 9=已失效（软删除） |
 | `create_time` | BigInteger | 创建时间戳 |
 
 #### `sys_department`
@@ -155,7 +156,8 @@ SQLBot 的行权限系统通过 `ds_rules` 表将权限规则分配给用户，`
 | `name` | varchar(128) | 部门名称 |
 | `code` | varchar(128) | 部门编码，用于外部同步映射（唯一） |
 | `parent_id` | BigInteger | 父部门ID（0=根节点） |
-| `origin` | int | 来源：0=手动, 1=钉钉, 2=企微, 3=LDAP |
+| `origin` | int | 来源：0=手动, 1=钉钉, 2=企微, 3=LDAP, 4=数据库同步 |
+| `status` | int | 状态：0=正常, 9=已失效（软删除） |
 | `create_time` | BigInteger | 创建时间戳 |
 
 **部门层级**：`parent_id` 支持树形结构。v1 中规则分配到部门时，**仅匹配该部门本身**，不隐式继承子部门（未来可扩展 `include_children` 标志）。
@@ -180,6 +182,47 @@ SQLBot 的行权限系统通过 `ds_rules` 表将权限规则分配给用户，`
 | `is_primary` | boolean | 是否为主部门 |
 
 唯一约束：`(uid, dept_id)`
+
+#### `sync_datasource`（同步数据源配置）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BigInteger (Identity) | 主键（自增，与 `core_datasource` 风格一致） |
+| `name` | varchar(128) | 配置名称 |
+| `db_type` | varchar(32) | 数据库类型：`mysql`（未来可扩展 `postgresql` 等） |
+| `host` | varchar(255) | 主机地址 |
+| `port` | int | 端口 |
+| `username` | varchar(255) | 用户名 |
+| `password` | Text (AES加密) | 密码（加密存储，复用现有 `aes_encrypt`/`aes_decrypt`） |
+| `database` | varchar(255) | 数据库名 |
+| `db_schema` | varchar(128) | Schema |
+| `enabled` | boolean | 是否启用 |
+| `cron_expression` | varchar(64) | 定时同步 cron 表达式，空串表示不定时 |
+| `create_time` | BigInteger | 创建时间 |
+
+#### `sync_table_mapping`（表映射配置）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BigInteger (Identity) | 主键（自增） |
+| `ds_id` | BigInteger | → `sync_datasource.id` |
+| `entity_type` | varchar(32) | `user` / `department` / `role` / `user_dept` / `user_role` |
+| `table_name` | varchar(128) | 外部表名（如 `t_user`） |
+| `enabled` | boolean | 是否启用此表同步 |
+
+#### `sync_log`（同步执行日志）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BigInteger (Identity) | 主键（自增） |
+| `ds_id` | BigInteger | → `sync_datasource.id` |
+| `status` | varchar(16) | `success` / `failed` / `running` |
+| `summary` | JSONB | 同步摘要 `{created: N, updated: M, deactivated: K, unchanged: L}` |
+| `error_message` | Text | 错误信息（失败时） |
+| `start_time` | BigInteger | 开始时间戳 |
+| `end_time` | BigInteger | 结束时间戳 |
+
+
 
 ### 3.2 修改表
 
@@ -299,19 +342,22 @@ def match_rule(rule: DsRules, current_user: CurrentUser, permission_id: int) -> 
 }
 ```
 
-### 5.5 外部同步 API（`/api/sync`）
+### 5.5 外部数据库同步 API（`/api/sync`）
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| POST | `/sync/{origin}/users` | 同步用户 | admin |
-| POST | `/sync/{origin}/roles` | 同步角色 | admin |
-| POST | `/sync/{origin}/departments` | 同步部门 | admin |
-| POST | `/sync/{origin}/user-roles` | 同步用户-角色关系 | admin |
-| POST | `/sync/{origin}/user-departments` | 同步用户-部门关系 | admin |
+| GET | `/sync/datasource` | 获取同步数据源列表 | admin |
+| POST | `/sync/datasource` | 创建同步数据源 | admin |
+| PUT | `/sync/datasource` | 更新同步数据源 | admin |
+| DELETE | `/sync/datasource/{id}` | 删除同步数据源 | admin |
+| POST | `/sync/datasource/{id}/test` | 测试数据源连接 | admin |
+| GET | `/sync/datasource/{id}/mapping` | 获取表映射配置 | admin |
+| PUT | `/sync/datasource/{id}/mapping` | 更新表映射配置 | admin |
+| POST | `/sync/datasource/{id}/execute` | 立即执行同步 | admin |
+| GET | `/sync/datasource/{id}/logs` | 获取同步日志 | admin |
+| PUT | `/sync/datasource/{id}/schedule` | 设置定时同步 | admin |
 
-`origin` 取值：`1=钉钉`, `2=企微`, `3=LDAP`
-
-每个同步接口接受标准化载荷，执行 **upsert** 逻辑（`code` 不存在则创建，已存在则更新名称）。同步完成后刷新受影响用户的冗余字段。
+同步执行接口内部流程：连接外部数据库 → 读取映射表数据 → 按 code/platform_uid 匹配 → upsert → 刷新冗余字段 → 标记失效 → 返回同步摘要。
 
 ---
 
@@ -404,73 +450,129 @@ def refresh_user_dept_ids(session: Session, uid: int):
 
 ---
 
-## 8. 外部同步架构
+## 8. 外部数据库同步架构
 
 ### 8.1 同步策略
 
-每个外部平台（钉钉、企微、LDAP）提供适配器，实现统一接口：
+从外部关系型数据库（当前支持 MySQL）直接读取表数据，同步到 SQLBot 的 `sys_user`、`sys_role`、`sys_department` 及关联表。
 
-```python
-class SyncAdapter(ABC):
-    @abstractmethod
-    async def get_departments(self) -> list[SyncDepartment]: ...
+- **Fixed Mapping**：外部表按约定列名自动映射，只需配置外部表名，无需逐列指定映射
+- **ID 稳定性**：同一外部实体多次同步后，SQLBot 内 snowflake ID 不变
+- **软删除**：外部已删除的实体标记为失效（status=9），不物理删除
+- **定时同步**：APScheduler 集成到 FastAPI，支持 cron 表达式
 
-    @abstractmethod
-    async def get_roles(self) -> list[SyncRole]: ...
+### 8.2 同步数据源配置
 
-    @abstractmethod
-    async def get_users(self) -> list[SyncUser]: ...
+独立存储同步数据源连接信息（不复用 `core_datasource`），与凭据隔离。
 
-    @abstractmethod
-    async def get_user_roles(self) -> list[SyncUserRole]: ...
+#### `sync_datasource`
 
-    @abstractmethod
-    async def get_user_departments(self) -> list[SyncUserDept]: ...
-```
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BigInteger (Identity) | 主键（自增，与 `core_datasource` 风格一致） |
+| `name` | varchar(128) | 配置名称 |
+| `db_type` | varchar(32) | 数据库类型：`mysql`（未来可扩展 `postgresql` 等） |
+| `host` | varchar(255) | 主机地址 |
+| `port` | int | 端口 |
+| `username` | varchar(255) | 用户名 |
+| `password` | Text (AES加密) | 密码（加密存储，复用现有 `aes_encrypt`/`aes_decrypt`） |
+| `database` | varchar(255) | 数据库名 |
+| `db_schema` | varchar(128) | Schema |
+| `enabled` | boolean | 是否启用 |
+| `cron_expression` | varchar(64) | 定时同步 cron 表达式（如 `0 */30 * * * *`），空串表示不定时 |
+| `create_time` | BigInteger | 创建时间 |
 
-### 8.2 标准化同步模型
+#### `sync_table_mapping`
 
-```python
-class SyncDepartment(BaseModel):
-    code: str          # 外部唯一ID（如钉钉 dept_id）
-    name: str
-    parent_code: str   # 父节点外部ID，空串表示根
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BigInteger (Identity) | 主键（自增） |
+| `ds_id` | BigInteger | → `sync_datasource.id` |
+| `entity_type` | varchar(32) | `user` / `department` / `role` / `user_dept` / `user_role` |
+| `table_name` | varchar(128) | 外部表名（如 `t_user`） |
+| `enabled` | boolean | 是否启用此表同步 |
 
-class SyncRole(BaseModel):
-    code: str          # 外部唯一ID（如钉钉 role_id）
-    name: str
+#### `sync_log`
 
-class SyncUser(BaseModel):
-    code: str          # 外部唯一用户ID
-    name: str
-    email: str
-    role_codes: list[str] = []
-    dept_codes: list[str] = []
-```
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BigInteger (Identity) | 主键（自增） |
+| `ds_id` | BigInteger | → `sync_datasource.id` |
+| `status` | varchar(16) | `success` / `failed` / `running` |
+| `summary` | JSONB | 同步摘要 `{created: N, updated: M, deactivated: K}` |
+| `error_message` | Text | 错误信息（失败时） |
+| `start_time` | BigInteger | 开始时间戳 |
+| `end_time` | BigInteger | 结束时间戳 |
 
-### 8.3 同步流程
+### 8.3 Fixed Mapping 约定
 
-1. 管理员点击"从钉钉同步"（或定时任务触发）
-2. 后端调用钉钉适配器 → 获取部门、角色、用户及其映射关系
-3. **Upsert 部门**：按 `code` 匹配，新建或更新名称
-4. **Upsert 角色**：按 `code` 弹配，同上
-5. **Upsert 用户**：按 `sys_user_platform.platform_uid` 匹配，更新 name/email
-6. **更新用户-角色映射**：清除受影响用户的 `sys_user_role` 记录，插入新映射
-7. **更新用户-部门映射**：清除受影响用户的 `sys_user_dept` 记录，插入新映射
-8. **刷新冗余字段**：批量刷新受影响用户的 `role_ids`/`dept_ids`
-9. 返回同步摘要：`{created: N, updated: M, deleted: 0}`
+外部表必须包含以下约定列名，自动映射到 SQLBot 内部字段：
 
-### 8.4 前端同步 UI
+| entity_type | 必须的列 | 映射到 SQLBot |
+|-------------|---------|--------------|
+| `user` | `id`, `name`, `email` | → `sys_user_platform.platform_uid`, `sys_user.name`, `sys_user.email` |
+| `department` | `code`, `name`, `parent_code` | → `sys_department.code`, `.name`, `.parent_id`（通过 parent_code 查内部 ID） |
+| `role` | `code`, `name` | → `sys_role.code`, `.name` |
+| `user_dept` | `user_id`, `dept_code`, `is_primary` | → `sys_user_dept`（通过 platform_uid + code 查内部 ID） |
+| `user_role` | `user_id`, `role_code` | → `sys_user_role`（通过 platform_uid + code 查内部 ID） |
 
-扩展现有 `SyncUserDing.vue` 为标签页对话框：
+> `parent_code` 为空串或 NULL 时表示根部门。`is_primary` 可选，默认 `false`。
 
-| Tab | 说明 |
-|-----|------|
-| 用户 | 现有功能（从组织树选择用户） |
-| 部门 | 开关：同步全部 / 选择特定部门 |
-| 角色 | 开关：同步全部 / 选择特定角色 |
+### 8.4 ID 稳定性机制
 
-或添加"全量同步"按钮，一键同步所有数据。
+**核心约束**：同一外部实体多次同步后，SQLBot 内的 snowflake ID 不得变化。
+
+| 实体 | 匹配键 | 首次同步 | 后续同步 |
+|------|--------|---------|----------|
+| 用户 | 外部 `id` → `sys_user_platform.platform_uid` | 创建用户（snowflake ID）+ 写入 `sys_user_platform(platform_uid=外部id, origin=4)` | 通过 `platform_uid` 查找 → 更新 name/email，**ID 不变** |
+| 角色 | 外部 `code` → `sys_role.code` | 按 code 创建（snowflake ID） | 按 code 查找 → 更新 name，**ID 不变** |
+| 部门 | 外部 `code` → `sys_department.code` | 按 code 创建（snowflake ID） | 按 code 查找 → 更新 name/parent_id，**ID 不变** |
+
+`origin` 枚举扩展：0=手动, 1=钉钉, 2=企微, 3=LDAP, **4=数据库同步**
+
+### 8.5 删除处理 — 软删除（标记失效）
+
+外部数据中不存在的实体（但 SQLBot 中 `origin=4` 的），标记为“已失效”，不物理删除：
+
+| 实体 | 失效标记方式 |
+|------|------------|
+| 用户 | `sys_user.status = 9`（已有 status 字段） |
+| 角色 | `sys_role.status = 9`（**需新增** status 字段，迁移中加入） |
+| 部门 | `sys_department.status = 9`（**需新增** status 字段，迁移中加入） |
+
+> status=0 表示正常，status=9 表示已失效。失效的实体不参与权限匹配，但保留在数据库中，避免破坏权限规则引用。
+
+### 8.6 定时同步 — APScheduler
+
+使用 APScheduler（AsyncIOScheduler）集成到 FastAPI 应用中：
+
+- 配置存储在 `sync_datasource.cron_expression`
+- FastAPI startup event 中初始化 scheduler，注册定时任务
+- 修改 cron 表达式时动态更新 scheduler job
+- 预设选项：每 30 分钟 / 每 1 小时 / 每天 / 自定义 cron
+
+### 8.7 同步执行流程
+
+1. 连接外部 MySQL（`sqlalchemy.create_engine`）
+2. 读取 5 张映射表的数据
+3. **Upsert 部门**（by code）→ 构建外部 code → 内部 ID 映射表
+4. **Upsert 角色**（by code）→ 构建外部 code → 内部 ID 映射表
+5. **Upsert 用户**（by platform_uid）→ 构建外部 id → 内部 ID 映射表
+6. **更新用户-部门关系**（by 映射表）→ 刷新受影响用户的 `dept_ids`
+7. **更新用户-角色关系**（by 映射表）→ 刷新受影响用户的 `role_ids`
+8. **标记失效**：origin=4 且不在本次同步数据中的实体 → status=9
+9. 写入 `sync_log`，返回同步摘要 `{created: N, updated: M, deactivated: K}`
+
+### 8.8 前端同步 UI
+
+在系统管理下新增**“同步配置”**页面（`/system/sync/index.vue`），包含：
+
+- 数据源连接配置（MySQL host/port/username/password/database）
+- 连接测试按钮
+- 表映射配置（5 个输入框填外部表名，启用/禁用开关）
+- 立即同步按钮 + 同步结果摘要
+- 定时同步配置（cron 预设下拉 + 自定义输入）
+- 同步历史日志列表
 
 ---
 
@@ -587,14 +689,18 @@ def upgrade():
 | 5.4 | `frontend/src/views/system/permission/Card.vue` | 卡片展示用户/角色/部门计数 |
 | 5.5 | `frontend/src/api/permissions.ts` | 扩展保存载荷支持 roles/departments |
 
-### 第六阶段：外部同步
+### 第六阶段：外部数据库同步
 
 | 步骤 | 文件 | 说明 |
 |------|------|------|
-| 6.1 | `backend/apps/system/sync/adapter.py` | 同步适配器基类 |
-| 6.2 | `backend/apps/system/sync/dingtalk.py` | 钉钉适配器实现 |
-| 6.3 | `backend/apps/system/api/sync.py` | 同步 API 端点 |
-| 6.4 | `frontend/src/views/system/user/SyncUserDing.vue` | 扩展部门/角色同步 Tab |
+| 6.1 | `backend/apps/system/models/sync_model.py` | 同步数据源、表映射、日志模型 |
+| 6.2 | `backend/alembic/versions/069_sync_tables.py` | 迁移：建 sync 表 + sys_role/sys_department 加 status 字段 |
+| 6.3 | `backend/apps/system/crud/sync_engine.py` | 同步引擎（连接外部DB、读取表、upsert、标记失效） |
+| 6.4 | `backend/apps/system/api/sync.py` | 同步 REST API（数据源CRUD、表映射、执行同步、日志） |
+| 6.5 | `backend/apps/system/sync/scheduler.py` | APScheduler 集成（启动时加载定时任务、动态更新） |
+| 6.6 | `frontend/src/api/sync.ts` | 同步 API 客户端 |
+| 6.7 | `frontend/src/views/system/sync/index.vue` | 同步配置页面 |
+| 6.8 | `frontend/src/router/` + `frontend/src/i18n/*.json` | 路由 + 国际化 |
 
 ### 第七阶段：国际化与完善
 
@@ -629,9 +735,12 @@ def upgrade():
 | `backend/apps/system/api/role.py` | **新建** | 角色 REST API |
 | `backend/apps/system/api/department.py` | **新建** | 部门 REST API |
 | `backend/apps/system/api/user.py` | 修改 | 扩展创建/更新支持角色/部门 |
-| `backend/apps/system/api/sync.py` | **新建** | 外部同步 API |
-| `backend/apps/system/sync/adapter.py` | **新建** | 同步适配器基类 |
-| `backend/apps/system/sync/dingtalk.py` | **新建** | 钉钉适配器 |
+| `backend/apps/system/models/sync_model.py` | **新建** | 同步数据源、表映射、日志模型 |
+| `backend/apps/system/crud/sync_engine.py` | **新建** | 同步引擎 |
+| `backend/apps/system/api/sync.py` | **新建** | 同步 REST API |
+| `backend/apps/system/sync/scheduler.py` | **新建** | APScheduler 集成 |
+| `frontend/src/api/sync.ts` | **新建** | 同步 API 客户端 |
+| `frontend/src/views/system/sync/index.vue` | **新建** | 同步配置页面 |
 | `backend/apps/datasource/crud/permission.py` | 修改 | 按角色/部门匹配规则 |
 | `backend/apps/api.py` | 修改 | 注册新路由 |
 | `frontend/src/views/system/role/index.vue` | **新建** | 角色管理页 |
