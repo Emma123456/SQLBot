@@ -5,7 +5,7 @@ from apps.dashboard.api import dashboard_api
 from apps.data_training.api import data_training
 from apps.datasource.api import datasource, table_relation, recommended_problem, permission_rule
 from apps.mcp import mcp
-from apps.system.api import login, user, aimodel, workspace, assistant, parameter, apikey, variable_api, department, role
+from apps.system.api import login, user, aimodel, workspace, assistant, parameter, apikey, variable_api, department, role, sync
 from apps.terminology.api import terminology
 from apps.settings.api import base
 #from audit.api import audit_api
@@ -34,5 +34,6 @@ api_router.include_router(permission_rule.router)
 api_router.include_router(variable_api.router)
 api_router.include_router(department.router)
 api_router.include_router(role.router)
+api_router.include_router(sync.router)
 
 #api_router.include_router(audit_api.router)

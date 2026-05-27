@@ -30,6 +30,7 @@ import Platform from '@/views/system/platform/index.vue'
 import Permission from '@/views/system/permission/index.vue'
 import Department from '@/views/system/department/index.vue'
 import Role from '@/views/system/role/index.vue'
+import Sync from '@/views/system/sync/index.vue'
 import User from '@/views/system/user/User.vue'
 import Workspace from '@/views/system/workspace/index.vue'
 import Page401 from '@/views/error/index.vue'
@@ -185,6 +186,12 @@ export const routes = [
         name: 'role',
         component: Role,
         meta: { title: t('role.management'), iconActive: 'user', iconDeActive: 'noUser' },
+      },
+      {
+        path: 'sync',
+        name: 'sync',
+        component: Sync,
+        meta: { title: t('sync.title'), iconActive: 'user', iconDeActive: 'noUser' },
       },
       {
         path: 'workspace',

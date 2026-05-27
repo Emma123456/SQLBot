@@ -1190,18 +1190,152 @@
 ---
 
 **第七阶段验收检查点 — 外部数据库同步测试**：
-- [ ] 同步数据源 CRUD 功能正常
-- [ ] 连接测试正常（成功/失败）
-- [ ] 表映射配置保存和加载正常
-- [ ] 手动同步正确执行 upsert（用户、角色、部门、关联关系）
-- [ ] 同步后冗余字段（role_ids/dept_ids）正确刷新
-- [ ] ID 稳定性：重复同步后 snowflake ID 不变
-- [ ] 软删除：外部已删除的实体标记为 status=9
-- [ ] APScheduler 定时同步正常触发
-- [ ] 动态更新 cron 表达式后 scheduler 任务更新
-- [ ] 同步日志正确记录（成功/失败/摘要）
-- [ ] 前端同步配置页面完整可用
-- [ ] 国际化四语言完整
+- [x] 同步数据源 CRUD 功能正常
+- [x] 连接测试正常（成功/失败）
+- [x] 表映射配置保存和加载正常
+- [x] 手动同步正确执行 upsert（用户、角色、部门、关联关系）
+- [x] 同步后冗余字段（role_ids/dept_ids）正确刷新
+- [x] ID 稳定性：重复同步后 snowflake ID 不变
+- [x] 软删除：外部已删除的实体标记为 status=9
+- [x] APScheduler 定时同步正常触发
+- [x] 动态更新 cron 表达式后 scheduler 任务更新
+- [x] 同步日志正确记录（成功/失败/摘要）
+- [x] 前端同步配置页面完整可用
+- [x] 国际化四语言完整
+
+> **Phase 7 Status**: ✅ COMPLETED (2026-05-27)
+> - Sync models: `SyncDatasource`, `SyncTableMapping`, `SyncLog` (sync_model.py)
+> - Added `status` field to `SysRole` and `SysDepartment` models (soft-deletion support)
+> - Migration 069: sync tables + status columns on sys_role/sys_department
+> - Sync engine: fixed-column mapping (user/department/role/user_dept/user_role)
+> - ID stability: platform_uid for users, code for roles/departments (origin=4)
+> - Soft-deletion: entities missing from external source marked status=9
+> - REST API: 10 endpoints under /system/sync (CRUD, test, mapping, execute, logs, schedule)
+> - APScheduler: AsyncIOScheduler, cron presets, dynamic add/remove/update
+> - Dependency: apscheduler>=3.11.0 added to pyproject.toml
+> - Frontend API client: sync.ts with typed interfaces
+> - Sync configuration page: datasource cards, create/edit dialog, table mapping, cron presets, log drawer
+> - Route: /system/sync added to frontend router
+> - i18n: 48 new keys added to all 4 locale files (zh-CN, en, zh-TW, ko-KR)
+
+### 步骤 7.9：多数据源 ds_id 隔离
+
+> 当存在多个同步数据源时，不同外部数据库可能有相同的主键值，导致数据覆盖或误删除。本步骤为所有同步实体增加 `ds_id` 隔离。
+
+**问题分析**：
+
+| 场景 | 无 ds_id 隔离时的行为 | 问题 |
+|------|----------------------|------|
+| 两个数据源都有 `user id=100` | 第二次同步覆盖第一次的用户（name/email） | 数据丢失 |
+| 两个数据源都有 `dept code=SALES` | 第二次同步覆盖第一次的部门名 | 数据丢失 |
+| 两个数据源都有 `role code=ADMIN` | 第二次同步覆盖第一次的角色名 | 数据丢失 |
+| 数据源 A 同步了 `code=HR`，数据源 B 没有 | 数据源 B 执行 mark_inactive 会把 A 的 HR 标记为 status=9 | 误删除 |
+
+**解决方案**：所有同步实体增加 `ds_id` 字段（指向 `sync_datasource.id`），将匹配键从全局唯一改为数据源内唯一。
+
+**文件路径**：`backend/apps/system/models/role_model.py`、`backend/apps/system/models/department_model.py`、`backend/apps/system/models/user.py`、`backend/apps/system/crud/sync_engine.py`
+
+**指令**：
+
+1. **模型变更**：
+   - `SysDepartment`：新增 `ds_id: int = Field(default=0, sa_type=BigInteger())`，删除 `code` 上的 `unique=True`，添加 `__table_args__ = (UniqueConstraint('code', 'ds_id', name='uq_dept_code_ds'),)`
+   - `SysRole`：同上，新增 `ds_id`，`UNIQUE(code, ds_id)` 替换 `UNIQUE(code)`，`name` 上的 `unique=True` 也改为非唯一（不同数据源可以有同名角色）
+   - `UserPlatformModel`：新增 `ds_id: int = Field(default=0, sa_type=BigInteger())`
+   - 手动创建的实体 `ds_id=0`，同步创建的实体 `ds_id=sync_datasource.id`
+
+2. **同步引擎变更**（`sync_engine.py`）：
+   - `upsert_departments()`：新增 `ds_id` 参数，查询改为 `WHERE code=x AND ds_id=ds_id`，创建时设置 `ds_id=ds_id`
+   - `upsert_roles()`：同上
+   - `upsert_users()`：新增 `ds_id` 参数，查询改为 `WHERE platform_uid=x AND origin=4 AND ds_id=ds_id`，创建 platform 记录时设置 `ds_id=ds_id`
+   - **外部用户表必须提供 `account` 列**：创建用户时 `account=row.get("account")` 而非 `sync_{ext_id}`；如果外部数据未提供 account 则回退到 `sync_{ext_id}`
+   - `sync_user_departments()`：查询 `SysUserDept` 时，过滤 `SysDepartment.ds_id == ds_id` 判断哪些关联属于当前数据源
+   - `sync_user_roles()`：同上，过滤 `SysRole.ds_id == ds_id`
+   - `mark_inactive()`：新增 `ds_id` 参数，查询改为 `WHERE origin=4 AND ds_id=ds_id`
+   - `mark_users_inactive()`：新增 `ds_id` 参数，查询改为 `WHERE origin=4 AND ds_id=ds_id`
+   - `run_sync()`：将 `ds.id` 传递给所有上述函数
+
+**验证测试**：
+- 创建两个同步数据源 A 和 B
+- 两个外部数据库都有 `user id=100`（不同名字）
+- 分别同步 A 和 B，验证 SQLBot 中存在两个不同的用户
+- 两个外部数据库都有 `dept code=SALES`（不同名称）
+- 分别同步 A 和 B，验证 SQLBot 中存在两个不同的部门
+- 执行 A 的 mark_inactive，验证 B 的实体不受影响
+- 同步 A 后删除外部 `code=HR`，再次同步 A，验证只有 A 的 HR 被标记为 status=9
+- 外部用户表提供 `account` 列，验证同步后 `sys_user.account` 等于外部值
+- 外部用户表不提供 `account` 列，验证回退为 `sync_{ext_id}`
+
+---
+
+### 步骤 7.10：同步数据源绑定工作空间
+
+> 当前同步引擎创建的用户 `oid=0`，无 `sys_user_ws` 记录，导致用户在非 admin 的工作空间视角下不可见。本步骤为 `sync_datasource` 增加 `oid` 字段，同步时自动将用户分配到指定工作空间。
+
+**文件路径**：`backend/apps/system/models/sync_model.py`、`backend/apps/system/crud/sync_engine.py`、`backend/apps/system/api/sync.py`、`frontend/src/api/sync.ts`、`frontend/src/views/system/sync/index.vue`
+
+**指令**：
+
+1. **SyncDatasource 模型变更**（`sync_model.py`）：
+   - `SyncDatasourceBase`：新增 `oid: int = Field(sa_type=BigInteger(), nullable=False, default=1)`
+   - `SyncDatasourceCreate`：新增 `oid: int = 1`
+   - `SyncDatasourceUpdate`：新增 `oid: Optional[int] = None`
+
+2. **同步引擎变更**（`sync_engine.py`）：
+   - `upsert_users()`：新增 `oid` 参数
+   - 创建新用户时设置 `oid=oid`
+   - 创建新用户后创建 `UserWsModel(id=snowflake, uid=new_uid, oid=oid, weight=0)`
+   - 更新已有用户时：如果 `user.oid == 0 and oid > 0`，更新 `user.oid = oid` 并补充创建 `sys_user_ws` 记录（先检查是否已存在）
+   - 如果 `user.oid > 0`，不修改其 `oid`（避免覆盖已设定的工作空间）
+   - `run_sync()`：从 `ds.oid` 读取并传递给 `upsert_users()`
+
+3. **同步 API 变更**（`sync.py`）：
+   - `create_datasource()`：传入 `dto.oid`
+   - `update_datasource()`：`setattr` 循环已自动包含 `oid`
+   - `list_datasources()`：`model_dump()` 已自动包含 `oid`
+
+4. **前端 API 类型变更**（`sync.ts`）：
+   - `SyncDatasource` 接口新增 `oid: number`
+   - `SyncDatasourceCreate` 接口新增 `oid?: number`
+   - `SyncDatasourceUpdate` 接口新增 `oid?: number`
+
+5. **前端同步配置页面变更**（`sync/index.vue`）：
+   - 导入 `userApi`（`@/api/auth`），在 `onMounted` 中调用 `userApi.ws_options()` 加载工作空间列表
+   - 新增 `workspaceOptions` 响应式变量
+   - `formData` 新增 `oid: 1`
+   - 在表单中（名称字段之后）添加工作空间 el-select
+   - `handleCreate()` 设置默认 `oid=1`
+   - `handleEdit()` 从 `ds.oid` 填充
+   - `resetForm()` 重置 `oid=1`
+   - `handleSave()` create 分支传入 `oid`
+   - 卡片显示工作空间名称（新增 `getWorkspaceName()` 辅助函数）
+
+6. **国际化**：`sync.workspace` 和 `sync.workspace_placeholder` 添加到四个语言文件
+
+**验证测试**：
+- 创建同步数据源，选择工作空间“测试空间”
+- 执行同步，验证新用户 `sys_user.oid` 等于数据源的 `oid`
+- 验证 `sys_user_ws` 表中有 `(uid, oid, weight=0)` 记录
+- 验证同步用户在指定工作空间的用户列表中可见
+- 已有用户（oid=0）再次同步后 oid 和 sys_user_ws 被更新
+- 幂等同步不重复创建 sys_user_ws 记录
+
+---
+
+**步骤 7.9-7.10 验收检查点**：
+- [ ] 外部用户表提供 `account` 列时，同步后 `sys_user.account` 等于外部值；不提供时回退为 `sync_{ext_id}`
+- [ ] `sys_department` 和 `sys_role` 包含 `ds_id` 列，`UNIQUE(code, ds_id)` 约束生效
+- [ ] `sys_user_platform` 包含 `ds_id` 列
+- [ ] 两个数据源有相同 code/id 时，各自独立存在，互不覆盖
+- [ ] mark_inactive 只影响当前数据源的实体
+- [ ] `sync_datasource` 包含 `oid` 列，默认值为 `1`
+- [ ] 同步后新用户的 `sys_user.oid` 等于数据源的 `oid`
+- [ ] 同步后新用户在 `sys_user_ws` 表中有记录
+- [ ] 同步用户在指定工作空间的用户列表中可见
+- [ ] 已有用户（oid=0）再次同步后 oid 和 sys_user_ws 被更新
+- [ ] 幂等同步不重复创建 sys_user_ws 记录
+- [ ] 前端工作空间下拉框正确显示
+- [ ] 卡片显示工作空间名称
+- [ ] 四语言翻译完整
 
 ---
 
@@ -1465,6 +1599,7 @@
 10. ✅ 所有测试场景通过
 11. ✅ 性能无明显下降
 12. ✅ 无控制台错误或后端异常日志
+13. ✅ 外部数据库同步功能完整（MySQL连接、Fixed Mapping、ID 稳定性、软删除、APScheduler 定时）
 
 ---
 
@@ -1482,7 +1617,7 @@
 
 ---
 
-**文档版本**：2.0  
+**文档版本**：2.1  
 **创建日期**：2026-05-26  
-**最后更新**：2026-05-26  
-**变更说明**：按功能模块重组实施顺序，每个功能前后端一起完成并测试后再进入下一模块
+**最后更新**：2026-05-27  
+**变更说明**：新增步骤 7.9（ds_id 多数据源隔离）和步骤 7.10（同步绑定工作空间）

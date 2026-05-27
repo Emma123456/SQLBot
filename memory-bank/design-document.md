@@ -458,6 +458,8 @@ def refresh_user_dept_ids(session: Session, uid: int):
 
 - **Fixed Mapping**：外部表按约定列名自动映射，只需配置外部表名，无需逐列指定映射
 - **ID 稳定性**：同一外部实体多次同步后，SQLBot 内 snowflake ID 不变
+- **ds_id 隔离**：每个同步数据源的实体通过 `ds_id` 隔离，防止不同数据源的主键/编码冲突
+- **工作空间绑定**：同步数据源指定目标工作空间，同步的用户自动加入该工作空间
 - **软删除**：外部已删除的实体标记为失效（status=9），不物理删除
 - **定时同步**：APScheduler 集成到 FastAPI，支持 cron 表达式
 
@@ -480,6 +482,7 @@ def refresh_user_dept_ids(session: Session, uid: int):
 | `db_schema` | varchar(128) | Schema |
 | `enabled` | boolean | 是否启用 |
 | `cron_expression` | varchar(64) | 定时同步 cron 表达式（如 `0 */30 * * * *`），空串表示不定时 |
+| `oid` | BigInteger | 同步用户归属的工作空间 ID，默认 `1` |
 | `create_time` | BigInteger | 创建时间 |
 
 #### `sync_table_mapping`
@@ -510,13 +513,13 @@ def refresh_user_dept_ids(session: Session, uid: int):
 
 | entity_type | 必须的列 | 映射到 SQLBot |
 |-------------|---------|--------------|
-| `user` | `id`, `name`, `email` | → `sys_user_platform.platform_uid`, `sys_user.name`, `sys_user.email` |
+| `user` | `id`, `name`, `email`, `account` | → `sys_user_platform.platform_uid`, `sys_user.name`, `sys_user.email`, `sys_user.account` |
 | `department` | `code`, `name`, `parent_code` | → `sys_department.code`, `.name`, `.parent_id`（通过 parent_code 查内部 ID） |
 | `role` | `code`, `name` | → `sys_role.code`, `.name` |
 | `user_dept` | `user_id`, `dept_code`, `is_primary` | → `sys_user_dept`（通过 platform_uid + code 查内部 ID） |
 | `user_role` | `user_id`, `role_code` | → `sys_user_role`（通过 platform_uid + code 查内部 ID） |
 
-> `parent_code` 为空串或 NULL 时表示根部门。`is_primary` 可选，默认 `false`。
+> `parent_code` 为空串或 NULL 时表示根部门。`is_primary` 可选，默认 `false`。`account` 为外部用户登录账号，如未提供则自动生成 `sync_{外部id}`。
 
 ### 8.4 ID 稳定性机制
 
@@ -524,15 +527,42 @@ def refresh_user_dept_ids(session: Session, uid: int):
 
 | 实体 | 匹配键 | 首次同步 | 后续同步 |
 |------|--------|---------|----------|
-| 用户 | 外部 `id` → `sys_user_platform.platform_uid` | 创建用户（snowflake ID）+ 写入 `sys_user_platform(platform_uid=外部id, origin=4)` | 通过 `platform_uid` 查找 → 更新 name/email，**ID 不变** |
-| 角色 | 外部 `code` → `sys_role.code` | 按 code 创建（snowflake ID） | 按 code 查找 → 更新 name，**ID 不变** |
-| 部门 | 外部 `code` → `sys_department.code` | 按 code 创建（snowflake ID） | 按 code 查找 → 更新 name/parent_id，**ID 不变** |
+| 用户 | `(platform_uid, origin, ds_id)` | 创建用户（snowflake ID，`account` 取外部 account 列，缺省回退 `sync_{ext_id}`）+ 写入 `sys_user_platform(platform_uid=外部id, origin=4, ds_id=数据源ID)` | 通过 `(platform_uid, origin, ds_id)` 查找 → 更新 name/email/account，**ID 不变** |
+| 角色 | `(code, ds_id)` | 按 code+ds_id 创建（snowflake ID） | 按 code+ds_id 查找 → 更新 name，**ID 不变** |
+| 部门 | `(code, ds_id)` | 按 code+ds_id 创建（snowflake ID） | 按 code+ds_id 查找 → 更新 name/parent_id，**ID 不变** |
 
 `origin` 枚举扩展：0=手动, 1=钉钉, 2=企微, 3=LDAP, **4=数据库同步**
 
+#### 8.4.1 多数据源 ID 冲突问题
+
+当存在多个同步数据源时，不同外部数据库可能有相同的主键值（如两个系统都有 `user id=100` 或 `department code=SALES`），如果不加区分会导致数据覆盖。
+
+**冲突场景分析**：
+
+| 场景 | 无 ds_id 隔离时的行为 | 问题 |
+|------|----------------------|------|
+| 两个数据源都有 `user id=100` | 第二次同步覆盖第一次的用户（name/email） | 数据丢失 |
+| 两个数据源都有 `dept code=SALES` | 第二次同步覆盖第一次的部门名 | 数据丢失 |
+| 两个数据源都有 `role code=ADMIN` | 第二次同步覆盖第一次的角色名 | 数据丢失 |
+| 数据源 A 同步了 `code=HR`，数据源 B 没有 | 数据源 B 执行 mark_inactive 会把 A 的 HR 标记为 status=9 | 误删除 |
+
+**解决方案：ds_id 隔离**
+
+所有同步实体增加 `ds_id` 字段（指向 `sync_datasource.id`），将匹配键从全局唯一改为数据源内唯一：
+
+| 实体 | 现有匹配键 | 改为 | 约束变更 |
+|------|-----------|------|----------|
+| 用户 | `(platform_uid, origin)` | `(platform_uid, origin, ds_id)` | `sys_user_platform` 新增 `ds_id` 列 |
+| 部门 | `code` 全局唯一 | `(code, ds_id)` 组合唯一 | `UNIQUE(code)` → `UNIQUE(code, ds_id)` |
+| 角色 | `code` 全局唯一 | `(code, ds_id)` 组合唯一 | `UNIQUE(code)` → `UNIQUE(code, ds_id)` |
+
+手动创建的实体（origin=0）`ds_id=0`，同步创建的实体 `ds_id=sync_datasource.id`。
+
+**mark_inactive 也必须按 ds_id 隔离**：只标记 `origin=4 AND ds_id=当前数据源ID` 且不在本次同步数据中的实体为 status=9，不影响其他数据源的实体。
+
 ### 8.5 删除处理 — 软删除（标记失效）
 
-外部数据中不存在的实体（但 SQLBot 中 `origin=4` 的），标记为“已失效”，不物理删除：
+外部数据中不存在的实体（但 SQLBot 中 `origin=4 AND ds_id=当前数据源ID` 的），标记为“已失效”，不物理删除：
 
 | 实体 | 失效标记方式 |
 |------|------------|
@@ -555,26 +585,75 @@ def refresh_user_dept_ids(session: Session, uid: int):
 
 1. 连接外部 MySQL（`sqlalchemy.create_engine`）
 2. 读取 5 张映射表的数据
-3. **Upsert 部门**（by code）→ 构建外部 code → 内部 ID 映射表
-4. **Upsert 角色**（by code）→ 构建外部 code → 内部 ID 映射表
-5. **Upsert 用户**（by platform_uid）→ 构建外部 id → 内部 ID 映射表
+3. **Upsert 部门**（by code + ds_id）→ 构建外部 code → 内部 ID 映射表
+4. **Upsert 角色**（by code + ds_id）→ 构建外部 code → 内部 ID 映射表
+5. **Upsert 用户**（by platform_uid + ds_id）→ 设置 `oid=ds.oid`，创建 `sys_user_ws` 记录 → 构建外部 id → 内部 ID 映射表
 6. **更新用户-部门关系**（by 映射表）→ 刷新受影响用户的 `dept_ids`
 7. **更新用户-角色关系**（by 映射表）→ 刷新受影响用户的 `role_ids`
-8. **标记失效**：origin=4 且不在本次同步数据中的实体 → status=9
+8. **标记失效**：origin=4 AND ds_id=当前数据源 且不在本次同步数据中的实体 → status=9
 9. 写入 `sync_log`，返回同步摘要 `{created: N, updated: M, deactivated: K}`
+
+#### 8.7.1 工作空间绑定
+
+同步数据源配置时指定 `oid`（工作空间 ID）。同步用户时：
+
+1. 新用户：设置 `sys_user.oid = ds.oid`，创建 `sys_user_ws(uid, oid=ds.oid, weight=0)` 记录
+2. 已有用户（oid=0）：更新 `sys_user.oid = ds.oid`，补充创建 `sys_user_ws` 记录（如不存在）
+3. 已有用户（oid>0）：不修改其 `oid`（避免覆盖已设定的工作空间）
+4. 幂等性：`sys_user_ws` 记录创建前先检查 `(uid, oid)` 是否已存在
+
+> `oid` 默认值为 `1`（默认工作空间），确保未指定工作空间的同步仍能正常工作。
 
 ### 8.8 前端同步 UI
 
 在系统管理下新增**“同步配置”**页面（`/system/sync/index.vue`），包含：
 
 - 数据源连接配置（MySQL host/port/username/password/database）
+- **工作空间选择器**（el-select，数据源为 `GET /user/ws` 返回的工作空间列表）
 - 连接测试按钮
 - 表映射配置（5 个输入框填外部表名，启用/禁用开关）
 - 立即同步按钮 + 同步结果摘要
 - 定时同步配置（cron 预设下拉 + 自定义输入）
 - 同步历史日志列表
+- 卡片显示工作空间名称
 
 ---
+
+### 8.9 外部表示例
+```
+-- t_user
+CREATE TABLE t_user (
+  id   VARCHAR(64) PRIMARY KEY,   -- maps to platform_uid
+  name VARCHAR(128) NOT NULL,      -- maps to sys_user.name
+  email VARCHAR(255)               -- maps to sys_user.email
+);
+
+-- t_department
+CREATE TABLE t_department (
+  code        VARCHAR(128) PRIMARY KEY,  -- maps to sys_department.code
+  name        VARCHAR(128) NOT NULL,      -- maps to sys_department.name
+  parent_code VARCHAR(128) DEFAULT ''     -- maps to parent_id via code lookup
+);
+
+-- t_role
+CREATE TABLE t_role (
+  code VARCHAR(128) PRIMARY KEY,  -- maps to sys_role.code
+  name VARCHAR(128) NOT NULL       -- maps to sys_role.name
+);
+
+-- t_user_dept
+CREATE TABLE t_user_dept (
+  user_id    VARCHAR(64) NOT NULL,   -- maps to uid via platform_uid lookup
+  dept_code  VARCHAR(128) NOT NULL,   -- maps to dept_id via code lookup
+  is_primary TINYINT(1) DEFAULT 0    -- maps to is_primary
+);
+
+-- t_user_role
+CREATE TABLE t_user_role (
+  user_id   VARCHAR(64) NOT NULL,    -- maps to uid via platform_uid lookup
+  role_code VARCHAR(128) NOT NULL     -- maps to role_id via code lookup
+);
+```
 
 ## 9. 数据库迁移计划
 
@@ -764,7 +843,8 @@ def upgrade():
 | **冗余数据漂移** | `sys_user` 上的 `role_ids`/`dept_ids` 与关联表不同步 | 每个变更路径（CRUD、同步、删除）都调用刷新函数。未来可加定期一致性检查任务 |
 | **向后兼容** | 现有 `ds_rules` 无 `role_list`/`dept_list` | 默认 `[]`，现有规则行为不变 |
 | **部门删除有子节点** | 子部门变为孤立 | v1 仅允许删除叶子节点。未来支持递归重分配或级联 |
-| **同步冲突** | 外部源重命名/删除了被权限规则引用的实体 | 同步仅新增/更新，不自动删除被 `ds_rules.role_list`/`dept_list` 引用的实体，改为标记"已失效" |
+| **同步冲突** | 外部源重命名/删除了被权限规则引用的实体 | 同步仅新增/更新，不自动删除被 `ds_rules.role_list`/`dept_list` 引用的实体，改为标记“已失效” |
+| **多数据源 ID 冲突** | 不同外部数据库有相同主键值，导致数据覆盖或误删除 | 所有同步实体增加 `ds_id` 隔离，匹配键改为数据源内唯一；mark_inactive 按 ds_id 隔离 |
 | **性能** | 每次规则检查 `json.loads()` 解析 `role_list`/`dept_list` | 冗余字段避免 JOIN；小数组 JSON 解析开销极低。大规模部署可改用 JSONB 包含查询 |
 | **xpack 兼容性** | `DsRules` 模型在编译 .so 中，无法直接访问新字段 | 新增列可正常添加（ORM 忽略未知列）。读取 `role_list`/`dept_list` 可能需 `getattr()` 降级或原生列访问 |
 

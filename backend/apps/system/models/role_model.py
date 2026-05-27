@@ -1,6 +1,6 @@
 from typing import Optional
 
-from sqlalchemy import BigInteger, UniqueConstraint
+from sqlalchemy import BigInteger, Integer, UniqueConstraint
 from sqlmodel import SQLModel, Field
 
 from common.core.models import SnowflakeBase
@@ -11,6 +11,7 @@ class SysRoleBase(SQLModel):
     code: str = Field(max_length=128, nullable=False, unique=True)
     description: Optional[str] = Field(max_length=512, default=None)
     origin: int = Field(nullable=False, default=0)
+    status: int = Field(sa_type=Integer(), nullable=False, default=0)
     create_time: int = Field(sa_type=BigInteger(), nullable=False)
 
 

@@ -55,12 +55,24 @@ async def lifespan(app: FastAPI):
     init_terminology_embedding_data()
     init_data_training_embedding_data()
     init_table_and_ds_embedding()
-    SQLBotLogUtil.info("✅ SQLBot 初始化完成")
+    # Initialize sync scheduler (APScheduler)
+    try:
+        from apps.system.sync.scheduler import init_scheduler
+        init_scheduler()
+    except Exception as e:
+        SQLBotLogUtil.warning(f"Sync scheduler init skipped: {e}")
+    SQLBotLogUtil.info("SQLBot initialization complete")
     await sqlbot_xpack.core.clean_xpack_cache()
     await async_model_info()  # 异步加密已有模型的密钥和地址
     await sqlbot_xpack.core.monitor_app(app)
     yield
-    SQLBotLogUtil.info("SQLBot 应用关闭")
+    # Shutdown sync scheduler
+    try:
+        from apps.system.sync.scheduler import shutdown_scheduler
+        shutdown_scheduler()
+    except Exception:
+        pass
+    SQLBotLogUtil.info("SQLBot application shutdown")
 
 
 def custom_generate_unique_id(route: APIRoute) -> str:
