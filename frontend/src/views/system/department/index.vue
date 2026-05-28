@@ -3,6 +3,34 @@
     <div class="tool-left">
       <span class="page-title">{{ $t('department.management') }}</span>
       <div class="search-bar">
+        <el-select
+          v-model="filterOid"
+          :placeholder="$t('department.workspace_placeholder')"
+          clearable
+          style="width: 180px; margin-right: 12px"
+          @change="handleFilterChange"
+        >
+          <el-option
+            v-for="ws in workspaceOptions"
+            :key="ws.id"
+            :label="ws.name"
+            :value="ws.id"
+          />
+        </el-select>
+        <el-select
+          v-model="filterDsId"
+          :placeholder="$t('department.sync_datasource_placeholder')"
+          clearable
+          style="width: 180px; margin-right: 12px"
+          @change="handleFilterChange"
+        >
+          <el-option
+            v-for="ds in syncDsOptions"
+            :key="ds.id"
+            :label="ds.name"
+            :value="ds.id"
+          />
+        </el-select>
         <el-button type="primary" @click="handleCreate()">
           <template #icon>
             <icon_add_outlined></icon_add_outlined>
@@ -26,6 +54,7 @@
           <div class="tree-node">
             <span class="node-label">{{ data.name }}</span>
             <span class="node-code">{{ data.code }}</span>
+            <span class="node-workspace" v-if="data.oid">{{ getWorkspaceName(data.oid) }}</span>
             <div class="node-actions">
               <el-tooltip effect="dark" :content="$t('department.create')" placement="top">
                 <el-icon class="action-btn" size="14" @click.stop="handleCreate(data)">
@@ -99,6 +128,20 @@
             style="width: 100%"
           />
         </el-form-item>
+        <el-form-item :label="$t('department.workspace')" prop="oid">
+          <el-select
+            v-model="formData.oid"
+            :placeholder="$t('department.workspace_placeholder')"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="ws in workspaceOptions"
+              :key="ws.id"
+              :label="ws.name"
+              :value="ws.id"
+            />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
@@ -166,6 +209,8 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { departmentApi, type DepartmentTreeNode } from '@/api/department'
 import { userApi } from '@/api/user'
+import { syncApi } from '@/api/sync'
+import { workspaceList } from '@/api/workspace'
 import IconOpeEdit from '@/assets/svg/icon_edit_outlined.svg'
 import IconOpeDelete from '@/assets/svg/icon_delete.svg'
 import icon_add_outlined from '@/assets/svg/icon_add_outlined.svg'
@@ -180,6 +225,10 @@ const loading = ref(false)
 const submitLoading = ref(false)
 const usersLoading = ref(false)
 const treeData = ref<DepartmentTreeNode[]>([])
+const filterOid = ref<number | undefined>(undefined)
+const filterDsId = ref<number | undefined>(undefined)
+const workspaceOptions = ref<any[]>([])
+const syncDsOptions = ref<any[]>([])
 
 // Dialog state
 const dialogVisible = ref(false)
@@ -189,6 +238,7 @@ const formData = reactive({
   name: '',
   code: '',
   parent_id: 0,
+  oid: 1 as number,
 })
 
 // Drawer state
@@ -226,7 +276,7 @@ const parentTreeOptions = computed(() => {
 const loadTree = async () => {
   loading.value = true
   try {
-    const res = await departmentApi.tree()
+    const res = await departmentApi.tree(filterDsId.value, filterOid.value)
     treeData.value = res || []
   } catch (e) {
     console.error('Failed to load department tree:', e)
@@ -241,6 +291,7 @@ const handleCreate = (parentData?: DepartmentTreeNode) => {
   formData.name = ''
   formData.code = ''
   formData.parent_id = parentData?.id || 0
+  formData.oid = 1
   dialogVisible.value = true
 }
 
@@ -250,6 +301,7 @@ const handleEdit = (data: DepartmentTreeNode) => {
   formData.name = data.name
   formData.code = data.code
   formData.parent_id = data.parent_id
+  formData.oid = data.oid || 1
   dialogVisible.value = true
 }
 
@@ -289,12 +341,14 @@ const handleSubmit = async () => {
         name: formData.name,
         code: formData.code,
         parent_id: formData.parent_id,
+        oid: formData.oid,
       })
     } else {
       await departmentApi.create({
         name: formData.name,
         code: formData.code,
         parent_id: formData.parent_id || 0,
+        oid: formData.oid,
       })
     }
     ElMessage.success(t('common.save_success'))
@@ -315,6 +369,16 @@ const onDialogClose = () => {
   formData.name = ''
   formData.code = ''
   formData.parent_id = 0
+  formData.oid = 1
+}
+
+const getWorkspaceName = (oid: number) => {
+  const ws = workspaceOptions.value.find((w: any) => String(w.id) === String(oid))
+  return ws?.name || String(oid)
+}
+
+const handleFilterChange = () => {
+  loadTree()
 }
 
 const handleManageUsers = async (data: DepartmentTreeNode) => {
@@ -383,6 +447,18 @@ const handleRemoveUser = async (user: any) => {
 
 onMounted(() => {
   loadTree()
+  // Load workspace options
+  workspaceList().then((res) => {
+    workspaceOptions.value = res || []
+  }).catch(() => {
+    workspaceOptions.value = []
+  })
+  // Load sync datasource options
+  syncApi.listDatasources().then((res: any) => {
+    syncDsOptions.value = res || []
+  }).catch(() => {
+    syncDsOptions.value = []
+  })
 })
 </script>
 
@@ -431,6 +507,12 @@ onMounted(() => {
   .node-code {
     font-size: 12px;
     color: #909399;
+    margin-left: 8px;
+  }
+
+  .node-workspace {
+    font-size: 12px;
+    color: #409eff;
     margin-left: 8px;
   }
 

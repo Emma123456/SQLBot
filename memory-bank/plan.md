@@ -1337,7 +1337,267 @@
 - [ ] 卡片显示工作空间名称
 - [ ] 四语言翻译完整
 
+
+需要核对的：
+以下检查项需要一个真实的带有测试数据的外部 MySQL 数据库：
+两个具有相同 code/id 的数据源 — 需要两个外部数据库
+mark_inactive 只影响当前数据源 — 需要同步两个数据源
+同步用户在工作空间用户列表中可见 — 需要端到端同步
+现有用户 oid=0 通过 oid/sys_user_ws 更新 — 需要重新同步
+幂等同步不会创建重复的 sys_user_ws 记录 — 需要两次同步运行
+
+同步日志内容应该为：同步用户信息成功，新增3条，修改5条，删除2条。同步部门信息成功，新增.....
+用户界面可以按照同步数据源筛选用户（已完成）
+部门和角色也要加 同步数据源 筛选功能，同时增加 工作空间筛选功能。
 ---
+
+### 步骤 7.11：角色与部门添加工作空间（oid）
+
+> 当前角色（`SysRole`）和部门（`SysDepartment`）只有 `ds_id`（数据源 ID），没有 `oid`（工作空间 ID）。数据同步时只有用户获得了工作空间分配，角色和部门也需要归属于某个工作空间。每个角色/部门只能属于一个工作空间，与用户的 `oid` 语义一致。
+
+**问题分析**：
+
+| 场景 | 当前行为 | 期望行为 |
+|------|----------|----------|
+| 同步数据源配置"北知局"工作空间 | 仅用户 oid=北知局，角色/部门无 oid | 角色/部门也应有 oid=北知局 |
+| 手动创建角色/部门 | 无工作空间选择 | 可选择所属工作空间 |
+| 按工作空间筛选角色/部门 | 不支持 | 支持按工作空间和同步数据源筛选 |
+| 编辑角色/部门 | 无法修改工作空间 | 可修改所属工作空间 |
+
+**解决方案**：角色和部门增加 `oid` 字段（与用户 `oid` 语义一致），同步时从数据源配置获取 `oid`，手动创建时默认 `oid=1`（默认工作空间）。
+
+---
+
+#### 7.11.1：后端模型 — 添加 `oid` 字段
+
+**文件路径**：`backend/apps/system/models/role_model.py`、`backend/apps/system/models/department_model.py`
+
+**指令**：
+1. `SysRoleBase` 新增 `oid: int = Field(default=1, sa_type=BigInteger())`
+2. `SysDepartmentBase` 新增 `oid: int = Field(default=1, sa_type=BigInteger())`
+3. 无需修改约束 — `oid` 是简单的可筛选字段，`UNIQUE(code, ds_id)` 保持不变
+
+**验证测试**：
+- 导入 `SysRole` 和 `SysDepartment`，验证包含 `oid` 字段且默认值为 `1`
+
+---
+
+#### 7.11.2：Alembic 迁移 072 — 添加 `oid` 列
+
+**文件路径**：`backend/alembic/versions/072_add_oid_to_role_dept.py`
+
+**指令**：
+1. `op.add_column('sys_role', Column('oid', BigInteger, nullable=False, server_default='1'))`
+2. `op.add_column('sys_department', Column('oid', BigInteger, nullable=False, server_default='1'))`
+3. 执行 `alembic upgrade head`
+
+**验证测试**：
+- 数据库中 `sys_role` 和 `sys_department` 表包含 `oid` 列，默认值为 `1`
+
+---
+
+#### 7.11.3：后端 Schema — DTO 添加 `oid`
+
+**文件路径**：`backend/apps/system/schemas/system_schema.py`
+
+**指令**：
+1. `RoleCreate`：新增 `oid: Optional[int] = Field(default=None)`
+2. `RoleUpdate`：新增 `oid: Optional[int] = Field(default=None)`
+3. `DepartmentCreate`：新增 `oid: Optional[int] = Field(default=None)`
+4. `DepartmentUpdate`：新增 `oid: Optional[int] = Field(default=None)`
+
+---
+
+#### 7.11.4：后端 CRUD — 传递 `oid` 参数 + 添加筛选
+
+**文件路径**：`backend/apps/system/crud/role.py`、`backend/apps/system/crud/department.py`
+
+**指令**：
+
+**角色 CRUD**（`role.py`）：
+1. `create_role()`：新增 `oid: int = 1` 参数，构造 `SysRole` 时设置 `oid=oid`
+2. `update_role()`：新增 `oid: Optional[int] = None` 参数，若提供则更新 `role.oid`
+3. `list_roles()`：新增 `ds_id: Optional[int] = None` 和 `oid: Optional[int] = None` 筛选参数，非空时添加 WHERE 条件
+4. `check_code_exists()`：无需修改（`UNIQUE(code, ds_id)` 不含 `oid`）
+
+**部门 CRUD**（`department.py`）：
+1. `create_department()`：新增 `oid: int = 1` 参数，构造 `SysDepartment` 时设置 `oid=oid`
+2. `update_department()`：新增 `oid: Optional[int] = None` 参数，若提供则更新 `dept.oid`
+3. `get_department_tree()`：新增 `ds_id: Optional[int] = None` 和 `oid: Optional[int] = None` 筛选参数
+4. `build_department_tree()`：在树节点 dict 中新增 `"oid"` 字段
+5. `check_code_exists()`：无需修改
+
+---
+
+#### 7.11.5：后端 API — 传递参数 + 添加筛选查询参数
+
+**文件路径**：`backend/apps/system/api/role.py`、`backend/apps/system/api/department.py`
+
+**指令**：
+
+**角色 API**（`role.py`）：
+1. `create` 端点：从 `dto.oid` 传递给 `create_role()`
+2. `update` 端点：从 `dto.oid` 传递给 `update_role()`
+3. `list_endpoint`：新增 `ds_id: Optional[int] = Query(default=None)` 和 `oid: Optional[int] = Query(default=None)` 查询参数，传递给 `list_roles()`
+
+**部门 API**（`department.py`）：
+1. `create` 端点：从 `dto.oid` 传递给 `create_department()`
+2. `update` 端点：从 `dto.oid` 传递给 `update_department()`
+3. `tree` 端点：新增 `ds_id: Optional[int] = Query(default=None)` 和 `oid: Optional[int] = Query(default=None)` 查询参数，传递给 `get_department_tree()`
+
+---
+
+#### 7.11.6：同步引擎 — 设置角色/部门的 `oid`
+
+**文件路径**：`backend/apps/system/crud/sync_engine.py`
+
+**指令**：
+1. `upsert_departments()`：新增 `oid: int = 1` 参数，创建时设置 `dept.oid = oid`，更新时也设置 `dept.oid = oid`（数据源 oid 为唯一真相）
+2. `upsert_roles()`：新增 `oid: int = 1` 参数，创建时设置 `role.oid = oid`，更新时也设置 `role.oid = oid`
+3. `run_sync()`：将 `oid=ds.oid` 传递给 `upsert_departments()` 和 `upsert_roles()`
+
+---
+
+#### 7.11.7：前端 API 类型 — 添加 `oid` 字段
+
+**文件路径**：`frontend/src/api/role.ts`、`frontend/src/api/department.ts`
+
+**指令**：
+
+**role.ts**：
+1. `Role` 接口：新增 `oid: number`
+2. `RoleCreate`：新增 `oid?: number`
+3. `RoleUpdate`：新增 `oid?: number`
+4. `roleApi.list()`：新增可选 `ds_id` 和 `oid` 查询参数
+
+**department.ts**：
+1. `Department` 接口：新增 `oid: number`
+2. `DepartmentTreeNode`（继承 Department）：自动包含 `oid`
+3. `DepartmentCreate`：新增 `oid?: number`
+4. `DepartmentUpdate`：新增 `oid?: number`
+5. `departmentApi.tree()`：新增可选 `ds_id` 和 `oid` 查询参数
+
+---
+
+#### 7.11.8：前端角色页面 — 工作空间选择器 + 筛选
+
+**文件路径**：`frontend/src/views/system/role/index.vue`
+
+**指令**：
+
+**筛选栏**：
+1. 搜索框旁新增工作空间下拉筛选（从 `workspaceList` API 加载选项）
+2. 新增同步数据源下拉筛选（从 `syncApi.list` API 加载选项）
+3. 选择筛选条件后重新加载角色列表
+
+**表格**：
+1. 新增"工作空间"列，显示工作空间名称（通过 `String(oid)` 在 workspaceOptions 中查找）
+2. 可选新增"来源"列，显示 `origin` 对应的标签（0=本地创建，10=DB Sync）
+
+**创建/编辑对话框**：
+1. 新增工作空间 `el-select`（从 `workspaceList` API 加载选项，必填，默认 `oid=1`）
+2. `formData` 新增 `oid: 1`
+3. `handleCreate()`：设置默认 `oid=1`
+4. `handleEdit()`：设置 `formData.oid = row.oid`
+5. `handleSubmit()`：将 `oid` 传递给 API
+6. `onDialogClose()`：重置 `oid=1`
+
+---
+
+#### 7.11.9：前端部门页面 — 工作空间选择器 + 筛选
+
+**文件路径**：`frontend/src/views/system/department/index.vue`
+
+**指令**：
+
+**筛选栏**：
+1. 页面标题旁新增工作空间下拉筛选（从 `workspaceList` API 加载选项）
+2. 新增同步数据源下拉筛选（从 `syncApi.list` API 加载选项）
+3. 选择筛选条件后重新加载部门树（传递 `ds_id` 和 `oid` 参数）
+
+**树节点**：
+1. 节点中可选显示工作空间名称标签
+
+**创建/编辑对话框**：
+1. 新增工作空间 `el-select`（从 `workspaceList` API 加载选项，必填，默认 `oid=1`）
+2. `formData` 新增 `oid: 1`
+3. `handleCreate()`：设置默认 `oid=1`
+4. `handleEdit()`：设置 `formData.oid = data.oid`
+5. `handleSubmit()`：将 `oid` 传递给 API
+6. `onDialogClose()`：重置 `oid=1`
+
+---
+
+#### 7.11.10：国际化 — 添加 i18n 键
+
+**文件路径**：`frontend/src/i18n/zh-CN.json`、`en.json`、`zh-TW.json`、`ko-KR.json`
+
+**指令**：
+
+为角色和部门上下文添加以下键（4 个语言文件）：
+
+| 键 | zh-CN | en | zh-TW | ko-KR |
+|----|-------|----|-------|-------|
+| `role.workspace` | 工作空间 | Workspace | 工作空間 | 워크스페이스 |
+| `role.workspace_placeholder` | 请选择工作空间 | Select workspace | 請選擇工作空間 | 워크스페이스를 선택하세요 |
+| `role.sync_datasource` | 同步数据源 | Sync Datasource | 同步資料來源 | 동기화 데이터 소스 |
+| `role.datasource_placeholder` | 请选择数据源 | Select datasource | 請選擇資料來源 | 데이터 소스를 선택하세요 |
+| `department.workspace` | 工作空间 | Workspace | 工作空間 | 워크스페이스 |
+| `department.workspace_placeholder` | 请选择工作空间 | Select workspace | 請選擇工作空間 | 워크스페이스를 선택하세요 |
+| `department.sync_datasource` | 同步数据源 | Sync Datasource | 同步資料來源 | 동기화 데이터 소스 |
+| `department.datasource_placeholder` | 请选择数据源 | Select datasource | 請選擇資料來源 | 데이터 소스를 선택하세요 |
+
+> 注意：`workspace` 和 `sync_datasource` 键已在 `sync` 命名空间下存在。此处为角色/部门命名空间添加独立键以支持各自的上下文。
+
+---
+
+#### 7.11.11：数据修复 — 更新现有同步记录的 `oid`
+
+**指令**：
+
+将现有同步角色/部门的 `oid` 值更新为其数据源的 `oid`：
+
+```sql
+-- 更新同步角色的 oid
+UPDATE sys_role r
+SET oid = ds.oid
+FROM sync_datasource ds
+WHERE r.ds_id = ds.id AND r.origin = 10 AND r.oid = 1;
+
+-- 更新同步部门的 oid
+UPDATE sys_department d
+SET oid = ds.oid
+FROM sync_datasource ds
+WHERE d.ds_id = ds.id AND d.origin = 10 AND d.oid = 1;
+```
+
+#### 7.11.12：验证
+重启后端服务
+测试：创建角色/部门时选择工作空间
+测试：编辑角色/部门，修改工作空间
+测试：按工作空间和数据源筛选角色列表
+测试：按工作空间和数据源筛选部门树
+测试：数据同步时角色和部门获得正确的 oid
+前端构建检查
+
+
+#### 步骤 7.11 验收检查点：
+ sys_role 和 sys_department 包含 oid 列，默认值为 1
+ 手动创建角色/部门时可选择工作空间，oid 正确保存
+ 编辑角色/部门时可修改工作空间
+ 同步创建的角色/部门 oid 等于数据源的 oid
+ 同步更新时角色/部门 oid 随数据源 oid 更新（数据源 oid 为唯一真相）
+ 角色列表页支持按工作空间筛选
+ 角色列表页支持按同步数据源筛选
+ 角色列表页表格显示工作空间名称列
+ 部门树页支持按工作空间筛选
+ 部门树页支持按同步数据源筛选
+ 现有同步记录的 oid 已修复为数据源的 oid
+ 四语言 i18n 键完整
+ 前端构建无错误
+
+--------
+
 
 ## 第八阶段：国际化与完善
 

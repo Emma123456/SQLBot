@@ -6,6 +6,8 @@ export interface Role {
   code: string
   description: string | null
   origin: number
+  oid: number
+  ds_id: number
   create_time: number
 }
 
@@ -20,6 +22,7 @@ export interface RoleCreate {
   name: string
   code: string
   description?: string | null
+  oid?: number
 }
 
 export interface RoleUpdate {
@@ -27,6 +30,7 @@ export interface RoleUpdate {
   name?: string
   code?: string
   description?: string | null
+  oid?: number
 }
 
 export interface RoleUser {
@@ -37,11 +41,13 @@ export interface RoleUser {
 }
 
 export const roleApi = {
-  list: (page: number = 1, pageSize: number = 20, keyword?: string) =>
+  list: (page: number = 1, pageSize: number = 20, keyword?: string, ds_id?: number, oid?: number) =>
     request.get<RoleListResult>('/system/role', {
-      params: { page, page_size: pageSize, keyword: keyword || undefined },
+      params: { page, page_size: pageSize, keyword: keyword || undefined, ds_id, oid },
     }),
-  all: () => request.get<Role[]>('/system/role/all'),
+  all: (oid?: number) => request.get<Role[]>('/system/role/all', {
+    params: { oid },
+  }),
   detail: (id: number) => request.get<Role>(`/system/role/${id}`),
   create: (data: RoleCreate) => request.post('/system/role', data),
   update: (data: RoleUpdate) => request.put('/system/role', data),

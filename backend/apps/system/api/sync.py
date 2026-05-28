@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import Session, select
+from sqlalchemy import text
 
 from apps.system.models.sync_model import (
     SyncDatasource,
@@ -59,6 +60,7 @@ async def create_datasource(
         db_schema=dto.db_schema,
         enabled=dto.enabled,
         cron_expression=dto.cron_expression,
+        oid=dto.oid,
     )
     session.add(ds)
     session.commit()

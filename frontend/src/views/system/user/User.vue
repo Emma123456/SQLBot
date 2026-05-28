@@ -685,6 +685,7 @@ import icon_add_outlined from '@/assets/svg/icon_add_outlined.svg'
 import { userApi } from '@/api/user'
 import { roleApi } from '@/api/role'
 import { departmentApi } from '@/api/department'
+import { syncApi } from '@/api/sync'
 import field_text from '@/assets/svg/field_text.svg'
 import field_time from '@/assets/svg/field_time.svg'
 import field_value from '@/assets/svg/field_value.svg'
@@ -736,6 +737,7 @@ const filterOption = ref<any[]>([
       { id: '3', name: 'LDAP' },
       { id: '4', name: 'OAuth2' },
       /* { id: '5', name: 'SAML2' }, */
+      { id: '10', name: t('user.db_sync') },
       { id: '6', name: t('user.wecom') },
       { id: '7', name: t('user.dingtalk') },
       { id: '8', name: t('user.lark') },
@@ -752,6 +754,14 @@ const filterOption = ref<any[]>([
     title: t('user.workspace'),
     operate: 'in',
     property: { placeholder: t('common.empty') + t('user.workspace') },
+  },
+  {
+    type: 'select',
+    option: [],
+    field: 'ds_id',
+    title: t('sync.sync_datasource'),
+    operate: 'in',
+    property: { placeholder: t('common.empty') + t('sync.sync_datasource') },
   },
 ])
 
@@ -771,6 +781,7 @@ const extAttrs = ref<{ key: string; value: string }[]>([])
 const options = ref<any[]>([])
 const roleOptions = ref<any[]>([])
 const deptTreeOptions = ref<any[]>([])
+const syncDsOptions = ref<any[]>([])
 const variables = shallowRef<any[]>([])
 const variableValueMap = shallowRef<any>({})
 const state = reactive<any>({
@@ -1037,6 +1048,7 @@ const editHandler = (row: any) => {
         extAttrs.value = rawVars.filter((e: any) => 'key' in e && !('variableId' in e))
         state.form = {
           ...row,
+          oid_list: (row.oid_list || []).map((id: any) => String(id)),
           system_variables: rawVars
             .filter((e: any) => 'variableId' in e)
             .map((ele: any) => ({
@@ -1294,15 +1306,15 @@ const handleCurrentChange = (val: number) => {
   state.pageInfo.currentPage = val
   search()
 }
-const getRoleName = (rid: number) => {
-  const role = roleOptions.value.find((r: any) => r.id === rid)
-  return role?.name || rid
+const getRoleName = (rid: any) => {
+  const role = roleOptions.value.find((r: any) => String(r.id) === String(rid))
+  return role?.name || String(rid)
 }
 
-const getDeptName = (did: number) => {
+const getDeptName = (did: any) => {
   const findName = (nodes: any[]): string => {
     for (const node of nodes) {
-      if (node.id === did) return node.name
+      if (String(node.id) === String(did)) return node.name
       if (node.children?.length) {
         const found = findName(node.children)
         if (found) return found
@@ -1319,9 +1331,9 @@ const formatSpaceName = (row_oid_list: Array<any>) => {
   }
   const wsMap: Record<string, string> = {}
   options.value.forEach((option: any) => {
-    wsMap[option.id] = option.name
+    wsMap[String(option.id)] = option.name
   })
-  return row_oid_list.map((id: any) => wsMap[id]).join(',')
+  return row_oid_list.map((id: any) => wsMap[String(id)] || String(id)).join(',')
 }
 const loadDefaultPwd = () => {
   userApi.defaultPwd().then((res) => {
@@ -1344,6 +1356,8 @@ const formatUserOrigin = (origin?: number) => {
     t('user.dingtalk'),
     t('user.lark'),
     t('user.larksuite'),
+    // 9 reserved
+    t('user.db_sync'),
   ]
   return originArray[origin - 1]
 }
@@ -1364,18 +1378,29 @@ onMounted(() => {
     filterOption.value[2].option = [...options.value]
   })
   
-  // Load role options for table display name resolution
+  // Load role options for table display name resolution - needs ALL roles, not filtered by workspace
   roleApi.all().then((res: any) => {
     roleOptions.value = res || []
   }).catch(() => {
     roleOptions.value = []
   })
   
-  // Load department tree for table display name resolution
+  // Load department tree for table display name resolution - needs ALL departments, not filtered by workspace
   departmentApi.tree().then((res: any) => {
     deptTreeOptions.value = res || []
   }).catch(() => {
     deptTreeOptions.value = []
+  })
+
+  // Load sync datasource options for filter
+  syncApi.listDatasources().then((res: any) => {
+    syncDsOptions.value = res || []
+    filterOption.value[3].option = syncDsOptions.value.map((ds: any) => ({
+      id: String(ds.id),
+      name: ds.name,
+    }))
+  }).catch(() => {
+    syncDsOptions.value = []
   })
   
   handleCurrentChange(1)

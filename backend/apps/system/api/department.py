@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from apps.system.crud.department import (
@@ -30,9 +30,14 @@ class DepartmentUserRemove(BaseModel):
 
 
 @router.get("/tree")
-async def tree(session: SessionDep, current_user: CurrentUser):
+async def tree(
+    session: SessionDep,
+    current_user: CurrentUser,
+    ds_id: Optional[int] = Query(default=None),
+    oid: Optional[int] = Query(default=None),
+):
     """Get department tree structure."""
-    return get_department_tree(session)
+    return get_department_tree(session, ds_id=ds_id, oid=oid)
 
 
 @router.get("/{dept_id}")
@@ -50,7 +55,7 @@ async def create(session: SessionDep, current_user: CurrentUser, dto: Department
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can create departments")
     try:
-        dept = create_department(session, name=dto.name, code=dto.code, parent_id=dto.parent_id)
+        dept = create_department(session, name=dto.name, code=dto.code, parent_id=dto.parent_id, oid=dto.oid or 1)
         session.commit()
         return dept
     except ValueError as e:
@@ -69,6 +74,7 @@ async def update(session: SessionDep, current_user: CurrentUser, dto: Department
             name=dto.name,
             code=dto.code,
             parent_id=dto.parent_id,
+            oid=dto.oid,
         )
         session.commit()
         return dept

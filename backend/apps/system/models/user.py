@@ -42,6 +42,7 @@ class UserPlatformBase(SQLModel):
     uid: int = Field(nullable=False, sa_type=BigInteger())
     origin: int = Field(nullable=False, default=0)
     platform_uid: str = Field(max_length=255, nullable=False)
+    ds_id: int = Field(default=0, sa_type=BigInteger())
 
 
 class UserPlatformModel(SnowflakeBase, UserPlatformBase, table=True):

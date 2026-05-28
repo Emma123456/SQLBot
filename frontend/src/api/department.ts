@@ -6,6 +6,8 @@ export interface Department {
   code: string
   parent_id: number
   origin: number
+  oid: number
+  ds_id: number
   create_time: number
 }
 
@@ -17,6 +19,7 @@ export interface DepartmentCreate {
   name: string
   code: string
   parent_id?: number
+  oid?: number
 }
 
 export interface DepartmentUpdate {
@@ -24,6 +27,7 @@ export interface DepartmentUpdate {
   name?: string
   code?: string
   parent_id?: number
+  oid?: number
 }
 
 export interface DepartmentUser {
@@ -35,7 +39,9 @@ export interface DepartmentUser {
 }
 
 export const departmentApi = {
-  tree: () => request.get<DepartmentTreeNode[]>('/system/department/tree'),
+  tree: (ds_id?: number, oid?: number) => request.get<DepartmentTreeNode[]>('/system/department/tree', {
+    params: { ds_id, oid },
+  }),
   detail: (id: number) => request.get<Department>(`/system/department/${id}`),
   create: (data: DepartmentCreate) => request.post('/system/department', data),
   update: (data: DepartmentUpdate) => request.put('/system/department', data),

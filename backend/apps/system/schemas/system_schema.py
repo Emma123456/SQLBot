@@ -234,6 +234,7 @@ class RoleCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128, description="角色名称")
     code: str = Field(min_length=1, max_length=128, description="角色编码")
     description: Optional[str] = Field(default=None, max_length=512, description="描述")
+    oid: Optional[int] = Field(default=None, description="工作空间ID")
 
 
 class RoleUpdate(BaseModel):
@@ -241,6 +242,7 @@ class RoleUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=128, description="角色名称")
     code: Optional[str] = Field(default=None, min_length=1, max_length=128, description="角色编码")
     description: Optional[str] = Field(default=None, max_length=512, description="描述")
+    oid: Optional[int] = Field(default=None, description="工作空间ID")
 
 
 class RoleResponse(BaseCreatorDTO):
@@ -256,6 +258,7 @@ class DepartmentCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128, description="部门名称")
     code: str = Field(min_length=1, max_length=128, description="部门编码")
     parent_id: int = Field(default=0, description="父部门ID")
+    oid: Optional[int] = Field(default=None, description="工作空间ID")
 
 
 class DepartmentUpdate(BaseModel):
@@ -263,6 +266,7 @@ class DepartmentUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=128, description="部门名称")
     code: Optional[str] = Field(default=None, min_length=1, max_length=128, description="部门编码")
     parent_id: Optional[int] = Field(default=None, description="父部门ID")
+    oid: Optional[int] = Field(default=None, description="工作空间ID")
 
 
 class DepartmentResponse(BaseCreatorDTO):

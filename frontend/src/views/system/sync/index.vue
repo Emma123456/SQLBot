@@ -43,14 +43,15 @@
             <span>{{ ds.database }}</span>
           </div>
           <div class="card-info">
+            <span class="info-label">{{ $t('sync.workspace') }}:</span>
+            <span>{{ getWorkspaceName(ds.oid) }}</span>
+          </div>
+          <div class="card-info">
             <span class="info-label">{{ $t('sync.schedule') }}:</span>
             <span>{{ ds.cron_expression || $t('sync.no_schedule') }}</span>
           </div>
         </div>
         <div class="card-actions">
-          <el-button size="small" @click="handleTestConnection(ds)">
-            {{ $t('sync.test_connection') }}
-          </el-button>
           <el-button size="small" type="primary" @click="handleSync(ds)">
             {{ $t('sync.execute') }}
           </el-button>
@@ -77,6 +78,16 @@
       <el-form ref="formRef" :model="formData" :rules="formRules" label-width="120px">
         <el-form-item :label="$t('sync.name')" prop="name">
           <el-input v-model="formData.name" />
+        </el-form-item>
+        <el-form-item :label="$t('sync.workspace')" prop="oid">
+          <el-select v-model="formData.oid" :placeholder="$t('sync.workspace_placeholder')">
+            <el-option
+              v-for="ws in workspaceOptions"
+              :key="ws.id"
+              :label="ws.name"
+              :value="ws.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item :label="$t('sync.db_type')" prop="db_type">
           <el-select v-model="formData.db_type" :disabled="isEdit">
@@ -206,6 +217,7 @@ import {
   type SyncTableMappingUpdate,
   type SyncSummary,
 } from '@/api/sync'
+import { userApi } from '@/api/auth'
 
 const { t } = useI18n()
 
@@ -232,6 +244,7 @@ const formData = reactive({
   db_schema: '',
   enabled: true,
   cron_expression: '',
+  oid: 1,
 })
 
 const formRules = {
@@ -255,9 +268,12 @@ const logPage = ref(1)
 const logTotal = ref(0)
 const logDsId = ref(0)
 
+// Workspace options
+const workspaceOptions = ref<any[]>([])
+
 // ── Helpers ────────────────────────────────────────────────────
 const ENTITY_LABELS: Record<string, string> = {
-  user: 'User (id, name, email)',
+  user: 'User (id, name, email, account)',
   department: 'Department (code, name, parent_code)',
   role: 'Role (code, name)',
   user_dept: 'User-Dept (user_id, dept_code, is_primary)',
@@ -292,9 +308,15 @@ function resetForm() {
   formData.db_schema = ''
   formData.enabled = true
   formData.cron_expression = ''
+  formData.oid = 1
   mappings.value = []
   cronPreset.value = ''
   testResult.value = null
+}
+
+function getWorkspaceName(oid: any): string {
+  const ws = workspaceOptions.value.find((w: any) => String(w.id) === String(oid))
+  return ws ? ws.name : String(oid)
 }
 
 function onCronPresetChange(val: string) {
@@ -351,6 +373,7 @@ async function handleEdit(ds: SyncDatasource) {
     db_schema: ds.db_schema || '',
     enabled: ds.enabled,
     cron_expression: ds.cron_expression,
+    oid: ds.oid,
   })
 
   // Load mappings
@@ -450,6 +473,7 @@ async function handleSave() {
       updateData.db_schema = formData.db_schema
       updateData.enabled = formData.enabled
       updateData.cron_expression = formData.cron_expression
+      updateData.oid = formData.oid
 
       await syncApi.updateDatasource(updateData)
 
@@ -477,6 +501,7 @@ async function handleSave() {
         db_schema: formData.db_schema || null,
         enabled: formData.enabled,
         cron_expression: formData.cron_expression,
+        oid: formData.oid,
       })
 
       // Save mappings for newly created datasource
@@ -521,8 +546,15 @@ async function loadLogs() {
 }
 
 // ── Init ───────────────────────────────────────────────────────
-onMounted(() => {
+onMounted(async () => {
   loadDatasources()
+  // Load workspace options
+  try {
+    const result = await userApi.ws_options()
+    workspaceOptions.value = Array.isArray(result) ? result : []
+  } catch {
+    workspaceOptions.value = []
+  }
 })
 </script>
 
@@ -586,10 +618,7 @@ onMounted(() => {
     margin-top: 12px;
     flex-wrap: wrap;
     align-items: center;
-
-    .el-button {
-      margin-left: 0 !important;
-    }
+    justify-content: flex-start;
   }
 }
 
@@ -608,5 +637,11 @@ onMounted(() => {
 
 .sync-result {
   padding: 16px 0;
+}
+</style>
+
+<style lang="less">
+.sync-card .card-actions .el-button {
+  margin-left: 0 !important;
 }
 </style>

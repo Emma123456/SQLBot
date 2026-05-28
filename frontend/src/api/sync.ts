@@ -12,6 +12,7 @@ export interface SyncDatasource {
   db_schema: string | null
   enabled: boolean
   cron_expression: string
+  oid: number
   create_time: number
 }
 
@@ -68,6 +69,7 @@ export interface SyncDatasourceCreate {
   db_schema?: string | null
   enabled?: boolean
   cron_expression?: string
+  oid?: number
 }
 
 export interface SyncDatasourceUpdate {
@@ -82,6 +84,7 @@ export interface SyncDatasourceUpdate {
   db_schema?: string | null
   enabled?: boolean
   cron_expression?: string
+  oid?: number
 }
 
 export interface SyncTableMappingUpdate {

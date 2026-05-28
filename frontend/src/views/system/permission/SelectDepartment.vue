@@ -69,6 +69,7 @@ import icon_dept from '@/assets/svg/icon_member_outlined.svg'
 import Close from '@/assets/svg/icon_close_outlined_w.svg'
 import Search from '@/assets/svg/icon_search-outline_outlined.svg'
 import type { DepartmentTreeNode } from '@/api/department'
+import { useUserStore } from '@/stores/user'
 
 const search = ref('')
 const loading = ref(false)
@@ -76,6 +77,7 @@ const deptTree = ref<DepartmentTreeNode[]>([])
 const checkedTableList = ref<any[]>([])
 const selectedKeys = ref<any[]>([])
 const treeRef = ref()
+const userStore = useUserStore()
 
 watch(search, (val) => {
   treeRef.value?.filter(val)
@@ -112,7 +114,8 @@ const open = async (selectedIds: any[]) => {
   checkedTableList.value = []
   selectedKeys.value = selectedIds || []
   try {
-    const res = await departmentApi.tree()
+    const currentOid = userStore.getOid ? Number(userStore.getOid) : undefined
+    const res = await departmentApi.tree(undefined, currentOid)
     deptTree.value = res || []
     // Pre-populate checkedTableList from selectedIds
     if (selectedIds?.length) {

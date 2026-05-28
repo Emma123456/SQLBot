@@ -20,6 +20,7 @@ class SyncDatasourceBase(SQLModel):
     db_schema: Optional[str] = Field(max_length=128, default=None, nullable=True)
     enabled: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, server_default="true"))
     cron_expression: str = Field(max_length=64, nullable=False, default="")
+    oid: int = Field(sa_type=BigInteger(), nullable=False, default=1)
     create_time: int = Field(sa_type=BigInteger(), nullable=False, default_factory=get_timestamp)
 
 
@@ -80,6 +81,7 @@ class SyncDatasourceCreate(SQLModel):
     db_schema: Optional[str] = None
     enabled: bool = True
     cron_expression: str = ""
+    oid: int = 1
 
 
 class SyncDatasourceUpdate(SQLModel):
@@ -94,6 +96,7 @@ class SyncDatasourceUpdate(SQLModel):
     db_schema: Optional[str] = None
     enabled: Optional[bool] = None
     cron_expression: Optional[str] = None
+    oid: Optional[int] = None
 
 
 class SyncTableMappingUpdate(SQLModel):

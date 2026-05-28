@@ -110,7 +110,10 @@
     "summary": "Summary",
     "error_message": "Error Message",
     "save_success": "Saved successfully",
-    "save_failed": "Save failed"
+    "save_failed": "Save failed",
+    "workspace": "Workspace",
+    "workspace_placeholder": "Select workspace",
+    "sync_datasource": "Sync Datasource"
   },
   "parameter": {
     "execution_details": "Execution Details",
@@ -571,6 +574,7 @@
     "enable": "Enabled",
     "disable": "Disabled",
     "local_creation": "Local",
+        "db_sync": "DB Sync",
     "lark": "Lark",
     "larksuite": "Larksuite",
     "dingtalk": "DingTalk",
@@ -667,7 +671,10 @@
     "is_primary": "Primary",
     "no_departments": "No departments yet",
     "delete_confirm": "Are you sure to delete department \"{name}\"?",
-    "remove_user_confirm": "Are you sure to remove user \"{name}\" from this department?"
+    "remove_user_confirm": "Are you sure to remove user \"{name}\" from this department?",
+    "workspace": "Workspace",
+    "workspace_placeholder": "Select workspace",
+    "sync_datasource_placeholder": "Select sync datasource"
   },
   "role": {
     "role": "Role",
@@ -682,7 +689,10 @@
     "manageUsers": "Manage Users",
     "search_placeholder": "Search role name or code",
     "delete_confirm": "Are you sure to delete role \"{name}\"? User assignments will also be removed.",
-    "remove_user_confirm": "Are you sure to remove user \"{name}\" from this role?"
+    "remove_user_confirm": "Are you sure to remove user \"{name}\" from this role?",
+    "workspace": "Workspace",
+    "workspace_placeholder": "Select workspace",
+    "sync_datasource_placeholder": "Select sync datasource"
   },
   "permission": {
     "search_field": "Search field",

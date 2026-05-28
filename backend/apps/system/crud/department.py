@@ -28,6 +28,7 @@ def build_department_tree(departments: list[SysDepartment]) -> list[dict]:
             "code": dept.code,
             "parent_id": str(dept.parent_id) if isinstance(dept.parent_id, int) and dept.parent_id > (2**53 - 1) else dept.parent_id,
             "origin": dept.origin,
+            "oid": dept.oid,
             "create_time": dept.create_time,
             "children": []
         }
@@ -39,9 +40,13 @@ def build_department_tree(departments: list[SysDepartment]) -> list[dict]:
     return [dept_to_dict(dept) for dept in roots]
 
 
-def get_department_tree(session: Session) -> list[dict]:
-    """Get all departments as a tree structure."""
+def get_department_tree(session: Session, ds_id: Optional[int] = None, oid: Optional[int] = None) -> list[dict]:
+    """Get all departments as a tree structure, optionally filtered by ds_id and oid."""
     stmt = select(SysDepartment).order_by(SysDepartment.create_time)
+    if ds_id is not None:
+        stmt = stmt.where(SysDepartment.ds_id == ds_id)
+    if oid is not None:
+        stmt = stmt.where(SysDepartment.oid == oid)
     departments = session.exec(stmt).all()
     return build_department_tree(list(departments))
 
@@ -82,7 +87,7 @@ def _is_descendant(session: Session, ancestor_id: int, node_id: int) -> bool:
     return False
 
 
-def create_department(session: Session, name: str, code: str, parent_id: int = 0) -> SysDepartment:
+def create_department(session: Session, name: str, code: str, parent_id: int = 0, oid: int = 1) -> SysDepartment:
     """Create a new department."""
     if check_code_exists(session, code):
         raise ValueError(f"Department code '{code}' already exists")
@@ -97,6 +102,7 @@ def create_department(session: Session, name: str, code: str, parent_id: int = 0
         code=code,
         parent_id=parent_id,
         origin=0,
+        oid=oid,
         create_time=get_timestamp()
     )
     session.add(dept)
@@ -111,7 +117,8 @@ def update_department(
     dept_id: int,
     name: Optional[str] = None,
     code: Optional[str] = None,
-    parent_id: Optional[int] = None
+    parent_id: Optional[int] = None,
+    oid: Optional[int] = None
 ) -> SysDepartment:
     """Update a department."""
     dept = session.get(SysDepartment, dept_id)
@@ -138,6 +145,8 @@ def update_department(
         dept.code = code
     if parent_id is not None:
         dept.parent_id = parent_id
+    if oid is not None:
+        dept.oid = oid
     
     session.add(dept)
     session.flush()

@@ -110,7 +110,10 @@
     "summary": "摘要",
     "error_message": "错误信息",
     "save_success": "保存成功",
-    "save_failed": "保存失败"
+    "save_failed": "保存失败",
+    "workspace": "工作空间",
+    "workspace_placeholder": "请选择工作空间",
+    "sync_datasource": "同步数据源"
   },
   "parameter": {
     "execution_details": "执行详情",
@@ -571,6 +574,7 @@
     "enable": "启用",
     "disable": "禁用",
     "local_creation": "本地创建",
+        "db_sync": "数据库同步",
     "lark": "飞书",
     "larksuite": "国际飞书",
     "dingtalk": "钉钉",
@@ -666,7 +670,10 @@
     "manageUsers": "管理用户",
     "search_placeholder": "搜索角色名称或编码",
     "delete_confirm": "确定删除角色 \"{name}\" 吗？删除后关联用户的角色分配也将移除。",
-    "remove_user_confirm": "确定将用户 \"{name}\" 从该角色移除吗？"
+    "remove_user_confirm": "确定将用户 \"{name}\" 从该角色移除吗？",
+    "workspace": "工作空间",
+    "workspace_placeholder": "选择工作空间",
+    "sync_datasource_placeholder": "选择同步数据源"
   },
   "department": {
     "department": "部门",
@@ -682,7 +689,10 @@
     "is_primary": "主部门",
     "no_departments": "暂无部门",
     "delete_confirm": "确定删除部门 \"{name}\" 吗？",
-    "remove_user_confirm": "确定将用户 \"{name}\" 从该部门移除吗？"
+    "remove_user_confirm": "确定将用户 \"{name}\" 从该部门移除吗？",
+    "workspace": "工作空间",
+    "workspace_placeholder": "选择工作空间",
+    "sync_datasource_placeholder": "选择同步数据源"
   },
   "permission": {
     "search_field": "搜索字段",

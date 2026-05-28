@@ -5,7 +5,7 @@ from sqlmodel import SQLModel, or_, select, delete as sqlmodel_delete
 from apps.system.crud.user import check_account_exists, check_email_exists, check_email_format, check_pwd_format, get_db_user, single_delete, user_ws_options
 from apps.system.crud.user_excel import batchUpload, downTemplate, download_error_file
 from apps.system.models.system_model import UserWsModel, WorkspaceModel
-from apps.system.models.user import UserModel
+from apps.system.models.user import UserModel, UserPlatformModel
 from apps.system.schemas.auth import CacheName, CacheNamespace
 from apps.system.schemas.permission import SqlbotPermission, require_permissions
 from apps.system.schemas.system_schema import PwdEditor, UserCreator, UserEditor, UserGrid, UserInfoDTO, UserLanguage, UserStatus, UserWs
@@ -58,6 +58,7 @@ async def pager(
     status: Optional[int] = Query(None, description=f"{PLACEHOLDER_PREFIX}status"),
     origins: Optional[list[int]] = Query(None, description=f"{PLACEHOLDER_PREFIX}origin"),
     oidlist: Optional[list[int]] = Query(None, description=f"{PLACEHOLDER_PREFIX}oid"),
+    ds_id: Optional[list[int]] = Query(None, description=f"{PLACEHOLDER_PREFIX}sync_datasource_id"),
 ):
     pagination = PaginationParams(page=pageNum, size=pageSize)
     paginator = Paginator(session)
@@ -75,6 +76,10 @@ async def pager(
         origin_stmt = origin_stmt.where(UserWsModel.oid.in_(oidlist))
     if origins:
         origin_stmt = origin_stmt.where(UserModel.origin.in_(origins))
+    if ds_id:
+        origin_stmt = origin_stmt.join(
+            UserPlatformModel, UserModel.id == UserPlatformModel.uid
+        ).where(UserPlatformModel.ds_id.in_(ds_id))
     if status is not None:
         origin_stmt = origin_stmt.where(UserModel.status == status)        
     if keyword:

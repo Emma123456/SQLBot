@@ -35,20 +35,22 @@ async def list_endpoint(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     keyword: Optional[str] = Query(default=None),
+    ds_id: Optional[int] = Query(default=None),
+    oid: Optional[int] = Query(default=None),
 ):
     """List roles with pagination. Admin only."""
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can list roles")
-    return list_roles(session, page=page, page_size=page_size, keyword=keyword)
+    return list_roles(session, page=page, page_size=page_size, keyword=keyword, ds_id=ds_id, oid=oid)
 
 
 @router.get("/all")
-async def list_all(session: SessionDep, current_user: CurrentUser):
+async def list_all(session: SessionDep, current_user: CurrentUser, oid: Optional[int] = Query(default=None)):
     """Get all roles as flat list (for dropdowns). Admin only."""
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can list roles")
     from apps.system.crud.role import get_all_roles
-    return get_all_roles(session)
+    return get_all_roles(session, oid=oid)
 
 
 @router.get("/{role_id}")
@@ -66,7 +68,7 @@ async def create(session: SessionDep, current_user: CurrentUser, dto: RoleCreate
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can create roles")
     try:
-        role = create_role(session, name=dto.name, code=dto.code, description=dto.description)
+        role = create_role(session, name=dto.name, code=dto.code, description=dto.description, oid=dto.oid or 1)
         session.commit()
         return role
     except ValueError as e:
@@ -85,6 +87,7 @@ async def update(session: SessionDep, current_user: CurrentUser, dto: RoleUpdate
             name=dto.name,
             code=dto.code,
             description=dto.description,
+            oid=dto.oid,
         )
         session.commit()
         return role

@@ -11,6 +11,34 @@
           @keyup.enter="handleSearch"
           @clear="handleSearch"
         />
+        <el-select
+          v-model="filterOid"
+          :placeholder="$t('role.workspace_placeholder')"
+          clearable
+          style="width: 180px; margin-right: 12px"
+          @change="handleSearch"
+        >
+          <el-option
+            v-for="ws in workspaceOptions"
+            :key="ws.id"
+            :label="ws.name"
+            :value="ws.id"
+          />
+        </el-select>
+        <el-select
+          v-model="filterDsId"
+          :placeholder="$t('role.sync_datasource_placeholder')"
+          clearable
+          style="width: 180px; margin-right: 12px"
+          @change="handleSearch"
+        >
+          <el-option
+            v-for="ds in syncDsOptions"
+            :key="ds.id"
+            :label="ds.name"
+            :value="ds.id"
+          />
+        </el-select>
         <el-button type="primary" @click="handleCreate()">
           <template #icon>
             <icon_add_outlined></icon_add_outlined>
@@ -24,6 +52,11 @@
       <el-table-column prop="name" :label="$t('role.name')" min-width="140" />
       <el-table-column prop="code" :label="$t('role.code')" min-width="140" />
       <el-table-column prop="description" :label="$t('role.description')" min-width="200" show-overflow-tooltip />
+      <el-table-column :label="$t('role.workspace')" min-width="120">
+        <template #default="{ row }">
+          {{ getWorkspaceName(row.oid) }}
+        </template>
+      </el-table-column>
       <el-table-column :label="$t('role.users')" width="100">
         <template #default="{ row }">
           <el-button link type="primary" @click="handleManageUsers(row)">
@@ -98,6 +131,20 @@
             clearable
           />
         </el-form-item>
+        <el-form-item :label="$t('role.workspace')" prop="oid">
+          <el-select
+            v-model="formData.oid"
+            :placeholder="$t('role.workspace_placeholder')"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="ws in workspaceOptions"
+              :key="ws.id"
+              :label="ws.name"
+              :value="ws.id"
+            />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
@@ -159,6 +206,8 @@ import { ref, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { roleApi, type Role } from '@/api/role'
 import { userApi } from '@/api/user'
+import { syncApi } from '@/api/sync'
+import { workspaceList } from '@/api/workspace'
 import IconOpeDelete from '@/assets/svg/icon_delete.svg'
 import icon_add_outlined from '@/assets/svg/icon_add_outlined.svg'
 import { ElMessage, ElMessageBox } from 'element-plus-secondary'
@@ -174,6 +223,10 @@ const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const searchKeyword = ref('')
+const filterOid = ref<number | undefined>(undefined)
+const filterDsId = ref<number | undefined>(undefined)
+const workspaceOptions = ref<any[]>([])
+const syncDsOptions = ref<any[]>([])
 
 // Dialog state
 const dialogVisible = ref(false)
@@ -183,6 +236,7 @@ const formData = reactive({
   name: '',
   code: '',
   description: '',
+  oid: 1 as number,
 })
 
 // Drawer state
@@ -200,7 +254,7 @@ const formRules = {
 const loadRoles = async () => {
   loading.value = true
   try {
-    const res = await roleApi.list(currentPage.value, pageSize.value, searchKeyword.value || undefined)
+    const res = await roleApi.list(currentPage.value, pageSize.value, searchKeyword.value || undefined, filterDsId.value, filterOid.value)
     tableData.value = res?.items || []
     total.value = res?.total || 0
   } catch (e) {
@@ -227,6 +281,7 @@ const handleCreate = () => {
   formData.name = ''
   formData.code = ''
   formData.description = ''
+  formData.oid = 1
   dialogVisible.value = true
 }
 
@@ -236,6 +291,7 @@ const handleEdit = (row: Role) => {
   formData.name = row.name
   formData.code = row.code
   formData.description = row.description || ''
+  formData.oid = row.oid || 1
   dialogVisible.value = true
 }
 
@@ -275,12 +331,14 @@ const handleSubmit = async () => {
         name: formData.name,
         code: formData.code,
         description: formData.description || null,
+        oid: formData.oid,
       })
     } else {
       await roleApi.create({
         name: formData.name,
         code: formData.code,
         description: formData.description || null,
+        oid: formData.oid,
       })
     }
     ElMessage.success(t('common.save_success'))
@@ -301,6 +359,7 @@ const onDialogClose = () => {
   formData.name = ''
   formData.code = ''
   formData.description = ''
+  formData.oid = 1
 }
 
 const handleManageUsers = async (row: Role) => {
@@ -367,8 +426,25 @@ const handleRemoveUser = async (user: any) => {
   }
 }
 
+const getWorkspaceName = (oid: number) => {
+  const ws = workspaceOptions.value.find((w: any) => String(w.id) === String(oid))
+  return ws?.name || String(oid)
+}
+
 onMounted(() => {
   loadRoles()
+  // Load workspace options
+  workspaceList().then((res) => {
+    workspaceOptions.value = res || []
+  }).catch(() => {
+    workspaceOptions.value = []
+  })
+  // Load sync datasource options
+  syncApi.listDatasources().then((res: any) => {
+    syncDsOptions.value = res || []
+  }).catch(() => {
+    syncDsOptions.value = []
+  })
 })
 </script>
 

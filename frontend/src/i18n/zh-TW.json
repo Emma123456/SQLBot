@@ -110,7 +110,10 @@
     "summary": "摘要",
     "error_message": "錯誤訊息",
     "save_success": "儲存成功",
-    "save_failed": "儲存失敗"
+    "save_failed": "儲存失敗",
+    "workspace": "工作空間",
+    "workspace_placeholder": "請選擇工作空間",
+    "sync_datasource": "同步資料來源"
   },
   "parameter": {
     "execution_details": "執行詳情",
@@ -571,6 +574,7 @@
     "enable": "啟用",
     "disable": "停用",
     "local_creation": "本機建立",
+        "db_sync": "資料庫同步",
     "lark": "飛書",
     "larksuite": "國際飛書",
     "dingtalk": "釘釘",
@@ -667,7 +671,10 @@
     "is_primary": "主部門",
     "no_departments": "暫無部門",
     "delete_confirm": "確定刪除部門 \"{name}\" 嗎？",
-    "remove_user_confirm": "確定將使用者 \"{name}\" 從該部門移除嗎？"
+    "remove_user_confirm": "確定將使用者 \"{name}\" 從該部門移除嗎？",
+    "workspace": "工作區",
+    "workspace_placeholder": "選擇工作區",
+    "sync_datasource_placeholder": "選擇同步資料來源"
   },
   "role": {
     "role": "角色",
@@ -682,7 +689,10 @@
     "manageUsers": "管理使用者",
     "search_placeholder": "搜尋角色名稱或編碼",
     "delete_confirm": "確定刪除角色 \"{name}\" 嗎？刪除後關聯使用者的角色分配也將移除。",
-    "remove_user_confirm": "確定將使用者 \"{name}\" 從該角色移除嗎？"
+    "remove_user_confirm": "確定將使用者 \"{name}\" 從該角色移除嗎？",
+    "workspace": "工作區",
+    "workspace_placeholder": "選擇工作區",
+    "sync_datasource_placeholder": "選擇同步資料來源"
   },
   "permission": {
     "search_field": "搜尋欄位",

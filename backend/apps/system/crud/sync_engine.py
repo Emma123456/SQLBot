@@ -18,7 +18,7 @@ import logging
 from typing import Optional
 
 from sqlalchemy import create_engine, text
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from apps.system.models.sync_model import (
     SyncDatasource,
@@ -29,6 +29,7 @@ from apps.system.models.sync_model import (
 from apps.system.models.role_model import SysRole, SysUserRole
 from apps.system.models.department_model import SysDepartment, SysUserDept
 from apps.system.models.user import UserModel, UserPlatformModel
+from apps.system.models.system_model import UserWsModel
 from apps.system.crud.user_role_dept import refresh_user_role_ids, refresh_user_dept_ids
 from apps.datasource.utils.utils import aes_encrypt, aes_decrypt
 from common.utils.time import get_timestamp
@@ -92,9 +93,11 @@ def read_external_table(engine, table_name: str) -> list[dict]:
 def upsert_departments(
     session: Session,
     ext_rows: list[dict],
-    origin: int = 4,
+    origin: int = 10,
+    ds_id: int = 0,
+    oid: int = 1,
 ) -> tuple[dict[str, int], int, int]:
-    """Upsert departments by code. Returns (code->id map, created_count, updated_count)."""
+    """Upsert departments by code+ds_id. Returns (code->id map, created_count, updated_count)."""
     code_to_id: dict[str, int] = {}
     created = 0
     updated = 0
@@ -107,7 +110,10 @@ def upsert_departments(
             continue
 
         existing = session.exec(
-            select(SysDepartment).where(SysDepartment.code == code)
+            select(SysDepartment).where(
+                SysDepartment.code == code,
+                SysDepartment.ds_id == ds_id,
+            )
         ).first()
 
         if existing:
@@ -117,6 +123,8 @@ def upsert_departments(
                 existing.parent_id = code_to_id[parent_code]
             elif not parent_code:
                 existing.parent_id = 0
+            # Datasource oid is the single source of truth
+            existing.oid = oid
             session.add(existing)
             code_to_id[code] = existing.id
             updated += 1
@@ -130,6 +138,8 @@ def upsert_departments(
                 code=code,
                 parent_id=parent_id,
                 origin=origin,
+                ds_id=ds_id,
+                oid=oid,
                 status=1,  # synced data defaults to enabled
                 create_time=get_timestamp(),
             )
@@ -144,9 +154,11 @@ def upsert_departments(
 def upsert_roles(
     session: Session,
     ext_rows: list[dict],
-    origin: int = 4,
+    origin: int = 10,
+    ds_id: int = 0,
+    oid: int = 1,
 ) -> tuple[dict[str, int], int, int]:
-    """Upsert roles by code. Returns (code->id map, created_count, updated_count)."""
+    """Upsert roles by code+ds_id. Returns (code->id map, created_count, updated_count)."""
     code_to_id: dict[str, int] = {}
     created = 0
     updated = 0
@@ -158,11 +170,16 @@ def upsert_roles(
             continue
 
         existing = session.exec(
-            select(SysRole).where(SysRole.code == code)
+            select(SysRole).where(
+                SysRole.code == code,
+                SysRole.ds_id == ds_id,
+            )
         ).first()
 
         if existing:
             existing.name = name
+            # Datasource oid is the single source of truth
+            existing.oid = oid
             session.add(existing)
             code_to_id[code] = existing.id
             updated += 1
@@ -172,6 +189,8 @@ def upsert_roles(
                 name=name,
                 code=code,
                 origin=origin,
+                ds_id=ds_id,
+                oid=oid,
                 status=1,  # synced data defaults to enabled
                 create_time=get_timestamp(),
             )
@@ -186,9 +205,16 @@ def upsert_roles(
 def upsert_users(
     session: Session,
     ext_rows: list[dict],
-    origin: int = 4,
+    origin: int = 10,
+    ds_id: int = 0,
+    oid: int = 1,
 ) -> tuple[dict[str, int], int, int]:
-    """Upsert users by platform_uid. Returns (platform_uid->internal_id map, created_count, updated_count)."""
+    """Upsert users by platform_uid+ds_id. Returns (platform_uid->internal_id map, created_count, updated_count).
+
+    Args:
+        ds_id: Sync datasource ID for multi-source isolation.
+        oid: Workspace ID to assign synced users to.
+    """
     uid_map: dict[str, int] = {}
     created = 0
     updated = 0
@@ -197,16 +223,20 @@ def upsert_users(
         ext_id = _clean(row.get("id"))
         name = _clean(row.get("name"), default=f"sync_user")
         email = _clean(row.get("email"))
+        account = _clean(row.get("account"))
+        if not account:
+            account = name
         if not email:
             email = f"sync_{ext_id}@sync.local"
         if not ext_id:
             continue
 
-        # Look up existing user via platform table
+        # Look up existing user via platform table (ds_id isolation)
         platform = session.exec(
             select(UserPlatformModel).where(
                 UserPlatformModel.platform_uid == ext_id,
                 UserPlatformModel.origin == origin,
+                UserPlatformModel.ds_id == ds_id,
             )
         ).first()
 
@@ -220,6 +250,18 @@ def upsert_users(
             if user:
                 user.name = name
                 user.email = email
+                user.account = account
+                # Datasource oid is the single source of truth
+                # Remove old workspace membership before assigning new one
+                if user.oid and user.oid != oid:
+                    session.exec(
+                        delete(UserWsModel).where(
+                            UserWsModel.uid == user.id,
+                            UserWsModel.oid == user.oid,
+                        )
+                    )
+                user.oid = oid
+                _ensure_user_ws(session, user.id, oid)
                 session.add(user)
             uid_map[ext_id] = platform.uid
             updated += 1
@@ -229,11 +271,12 @@ def upsert_users(
             new_uid = snowflake.generate_id()
             user = UserModel(
                 id=new_uid,
-                account=f"sync_{ext_id}",
+                account=account,
                 name=name,
                 email=email,
                 password=default_md5_pwd(),
                 origin=origin,
+                oid=oid,
                 status=1,  # synced data defaults to enabled
                 create_time=get_timestamp(),
                 role_ids=[],
@@ -247,8 +290,13 @@ def upsert_users(
                 uid=new_uid,
                 origin=origin,
                 platform_uid=ext_id,
+                ds_id=ds_id,
             )
             session.add(platform_record)
+
+            # Create sys_user_ws record for workspace membership
+            _ensure_user_ws(session, new_uid, oid)
+
             uid_map[ext_id] = new_uid
             created += 1
 
@@ -257,13 +305,35 @@ def upsert_users(
 
 # ── relation sync ───────────────────────────────────────────────
 
+def _ensure_user_ws(session: Session, uid: int, oid: int) -> None:
+    """Create sys_user_ws record if not already exists. Idempotent."""
+    existing = session.exec(
+        select(UserWsModel).where(
+            UserWsModel.uid == uid,
+            UserWsModel.oid == oid,
+        )
+    ).first()
+    if not existing:
+        ws_record = UserWsModel(
+            id=snowflake.generate_id(),
+            uid=uid,
+            oid=oid,
+            weight=0,
+        )
+        session.add(ws_record)
+
+
 def sync_user_departments(
     session: Session,
     ext_rows: list[dict],
     user_map: dict[str, int],
     dept_map: dict[str, int],
+    ds_id: int = 0,
 ) -> int:
-    """Sync user-department relations. Uses upsert to avoid UniqueViolation."""
+    """Sync user-department relations. Uses upsert to avoid UniqueViolation.
+
+    Only manages relations for departments belonging to the given ds_id.
+    """
     synced = 0
     affected_uids: set[int] = set()
 
@@ -283,9 +353,19 @@ def sync_user_departments(
             valid_pairs[(uid, dept_id)] = is_primary
             affected_uids.add(uid)
 
+    # Pre-load ALL existing (uid, dept_id) pairs for affected users to avoid UniqueViolation
+    # This includes relations from any origin (local, OAuth2, etc.), not just DB Sync
+    all_existing_pairs: set[tuple[int, int]] = set()
+    for uid in affected_uids:
+        rows = session.exec(
+            select(SysUserDept.uid, SysUserDept.dept_id).where(SysUserDept.uid == uid)
+        ).all()
+        for r in rows:
+            all_existing_pairs.add((r[0], r[1]))
+
     # For each affected user: upsert relations
     for uid in affected_uids:
-        # Load existing user-dept relations for sync-originated depts
+        # Load existing user-dept relations for sync-originated depts in THIS datasource
         existing_rels = session.exec(
             select(SysUserDept).where(SysUserDept.uid == uid)
         ).all()
@@ -293,7 +373,8 @@ def sync_user_departments(
         to_delete: list[SysUserDept] = []
         for rel in existing_rels:
             dept = session.get(SysDepartment, rel.dept_id)
-            if dept and dept.origin == 4:
+            all_existing_pairs.add((rel.uid, rel.dept_id))
+            if dept and dept.origin == 10 and dept.ds_id == ds_id:
                 existing_map[(rel.uid, rel.dept_id)] = rel
                 # If this existing pair is NOT in new data, mark for deletion
                 if (rel.uid, rel.dept_id) not in valid_pairs:
@@ -313,6 +394,10 @@ def sync_user_departments(
                     existing.is_primary = is_primary
                     session.add(existing)
                 else:
+                    # Skip if relation already exists from any origin (avoid UniqueViolation)
+                    if (u, d) in all_existing_pairs:
+                        synced += 1
+                        continue
                     new_rel = SysUserDept(
                         id=snowflake.generate_id(),
                         uid=u,
@@ -333,8 +418,12 @@ def sync_user_roles(
     ext_rows: list[dict],
     user_map: dict[str, int],
     role_map: dict[str, int],
+    ds_id: int = 0,
 ) -> int:
-    """Sync user-role relations. Uses upsert to avoid UniqueViolation."""
+    """Sync user-role relations. Uses upsert to avoid UniqueViolation.
+
+    Only manages relations for roles belonging to the given ds_id.
+    """
     synced = 0
     affected_uids: set[int] = set()
 
@@ -353,6 +442,15 @@ def sync_user_roles(
             valid_pairs.add((uid, role_id))
             affected_uids.add(uid)
 
+    # Pre-load ALL existing (uid, role_id) pairs for affected users to avoid UniqueViolation
+    all_existing_role_pairs: set[tuple[int, int]] = set()
+    for uid in affected_uids:
+        rows = session.exec(
+            select(SysUserRole.uid, SysUserRole.role_id).where(SysUserRole.uid == uid)
+        ).all()
+        for r in rows:
+            all_existing_role_pairs.add((r[0], r[1]))
+
     # For each affected user: upsert relations
     for uid in affected_uids:
         existing_rels = session.exec(
@@ -362,7 +460,8 @@ def sync_user_roles(
         to_delete: list[SysUserRole] = []
         for rel in existing_rels:
             role = session.get(SysRole, rel.role_id)
-            if role and role.origin == 4:
+            all_existing_role_pairs.add((rel.uid, rel.role_id))
+            if role and role.origin == 10 and role.ds_id == ds_id:
                 existing_pairs.add((rel.uid, rel.role_id))
                 if (rel.uid, rel.role_id) not in valid_pairs:
                     to_delete.append(rel)
@@ -375,6 +474,10 @@ def sync_user_roles(
         # Upsert: insert only missing pairs (role has no updatable fields)
         for (u, r) in valid_pairs:
             if u == uid and (u, r) not in existing_pairs:
+                # Skip if relation already exists from any origin (avoid UniqueViolation)
+                if (u, r) in all_existing_role_pairs:
+                    synced += 1
+                    continue
                 new_rel = SysUserRole(
                     id=snowflake.generate_id(),
                     uid=u,
@@ -394,11 +497,15 @@ def mark_inactive(
     session: Session,
     model_class,
     active_codes: set[str],
-    origin: int = 4,
+    origin: int = 10,
+    ds_id: int = 0,
 ) -> int:
-    """Mark entities with given origin and code NOT in active_codes as status=9."""
+    """Mark entities with given origin+ds_id and code NOT in active_codes as status=9."""
     entities = session.exec(
-        select(model_class).where(model_class.origin == origin)
+        select(model_class).where(
+            model_class.origin == origin,
+            model_class.ds_id == ds_id,
+        )
     ).all()
     deactivated = 0
     for entity in entities:
@@ -412,12 +519,17 @@ def mark_inactive(
 def mark_users_inactive(
     session: Session,
     active_ext_ids: set[str],
-    origin: int = 4,
+    origin: int = 10,
+    ds_id: int = 0,
 ) -> int:
     """Mark sync-originated users whose platform_uid is not in active_ext_ids as status=9.
+    Only affects users belonging to the given ds_id.
     Never touch the system admin user (id=1)."""
     platforms = session.exec(
-        select(UserPlatformModel).where(UserPlatformModel.origin == origin)
+        select(UserPlatformModel).where(
+            UserPlatformModel.origin == origin,
+            UserPlatformModel.ds_id == ds_id,
+        )
     ).all()
     deactivated = 0
     for p in platforms:
@@ -473,7 +585,7 @@ def run_sync(session: Session, ds_id: int) -> dict:
         dept_mapping = mapping_map.get("department")
         if dept_mapping and dept_mapping.enabled and dept_mapping.table_name:
             ext_depts = read_external_table(engine, dept_mapping.table_name)
-            dept_map, created, updated = upsert_departments(session, ext_depts)
+            dept_map, created, updated = upsert_departments(session, ext_depts, ds_id=ds.id, oid=ds.oid)
             summary["created"] += created
             summary["updated"] += updated
             summary["dept_created"] = created
@@ -484,7 +596,7 @@ def run_sync(session: Session, ds_id: int) -> dict:
         role_mapping = mapping_map.get("role")
         if role_mapping and role_mapping.enabled and role_mapping.table_name:
             ext_roles = read_external_table(engine, role_mapping.table_name)
-            role_map, created, updated = upsert_roles(session, ext_roles)
+            role_map, created, updated = upsert_roles(session, ext_roles, ds_id=ds.id, oid=ds.oid)
             summary["created"] += created
             summary["updated"] += updated
             summary["role_created"] = created
@@ -495,7 +607,7 @@ def run_sync(session: Session, ds_id: int) -> dict:
         user_mapping = mapping_map.get("user")
         if user_mapping and user_mapping.enabled and user_mapping.table_name:
             ext_users = read_external_table(engine, user_mapping.table_name)
-            user_map, created, updated = upsert_users(session, ext_users)
+            user_map, created, updated = upsert_users(session, ext_users, ds_id=ds.id, oid=ds.oid)
             summary["created"] += created
             summary["updated"] += updated
             summary["user_created"] = created
@@ -505,32 +617,32 @@ def run_sync(session: Session, ds_id: int) -> dict:
         ud_mapping = mapping_map.get("user_dept")
         if ud_mapping and ud_mapping.enabled and ud_mapping.table_name and user_map and dept_map:
             ext_user_depts = read_external_table(engine, ud_mapping.table_name)
-            synced = sync_user_departments(session, ext_user_depts, user_map, dept_map)
+            synced = sync_user_departments(session, ext_user_depts, user_map, dept_map, ds_id=ds.id)
             summary["user_dept_synced"] = synced
 
         # 5. Sync user-role relations
         ur_mapping = mapping_map.get("user_role")
         if ur_mapping and ur_mapping.enabled and ur_mapping.table_name and user_map and role_map:
             ext_user_roles = read_external_table(engine, ur_mapping.table_name)
-            synced = sync_user_roles(session, ext_user_roles, user_map, role_map)
+            synced = sync_user_roles(session, ext_user_roles, user_map, role_map, ds_id=ds.id)
             summary["user_role_synced"] = synced
 
-        # 6. Mark inactive entities
+        # 6. Mark inactive entities (scoped to this datasource)
         if dept_map:
             active_dept_codes = set(dept_map.keys())
-            deactivated = mark_inactive(session, SysDepartment, active_dept_codes)
+            deactivated = mark_inactive(session, SysDepartment, active_dept_codes, ds_id=ds.id)
             summary["deactivated"] += deactivated
             summary["dept_deactivated"] = deactivated
 
         if role_map:
             active_role_codes = set(role_map.keys())
-            deactivated = mark_inactive(session, SysRole, active_role_codes)
+            deactivated = mark_inactive(session, SysRole, active_role_codes, ds_id=ds.id)
             summary["deactivated"] += deactivated
             summary["role_deactivated"] = deactivated
 
         if user_map:
             active_user_ids = set(user_map.keys())
-            deactivated = mark_users_inactive(session, active_user_ids)
+            deactivated = mark_users_inactive(session, active_user_ids, ds_id=ds.id)
             summary["deactivated"] += deactivated
             summary["user_deactivated"] = deactivated
 

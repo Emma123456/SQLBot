@@ -90,6 +90,7 @@ import icon_member from '@/assets/svg/icon_member_outlined.svg'
 import Close from '@/assets/svg/icon_close_outlined_w.svg'
 import Search from '@/assets/svg/icon_search-outline_outlined.svg'
 import type { CheckboxValueType } from 'element-plus-secondary'
+import { useUserStore } from '@/stores/user'
 
 const checkAll = ref(false)
 const isIndeterminate = ref(false)
@@ -98,6 +99,7 @@ const roles = ref<any[]>([])
 const search = ref('')
 const loading = ref(false)
 const checkedTableList = ref<any[]>([])
+const userStore = useUserStore()
 
 const rolesWithKeywords = computed(() => {
   return roles.value.filter((ele: any) => (ele.name as string).includes(search.value))
@@ -148,7 +150,8 @@ const open = async (selectedIds: number[]) => {
   checkedTableList.value = []
   isIndeterminate.value = false
   try {
-    const res = await roleApi.all()
+    const currentOid = userStore.getOid ? Number(userStore.getOid) : undefined
+    const res = await roleApi.all(currentOid)
     roles.value = res || []
     if (selectedIds?.length) {
       checkedRoleIds.value = [...selectedIds]

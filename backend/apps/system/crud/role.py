@@ -8,7 +8,7 @@ from common.utils.time import get_timestamp
 from common.utils.utils import SQLBotLogUtil
 
 
-def list_roles(session: Session, page: int = 1, page_size: int = 20, keyword: Optional[str] = None) -> dict:
+def list_roles(session: Session, page: int = 1, page_size: int = 20, keyword: Optional[str] = None, ds_id: Optional[int] = None, oid: Optional[int] = None) -> dict:
     """List roles with pagination and optional keyword search."""
     base_stmt = select(SysRole)
     count_stmt = select(func.count()).select_from(SysRole)
@@ -17,6 +17,14 @@ def list_roles(session: Session, page: int = 1, page_size: int = 20, keyword: Op
         filter_clause = (SysRole.name.contains(keyword)) | (SysRole.code.contains(keyword))
         base_stmt = base_stmt.where(filter_clause)
         count_stmt = count_stmt.where(filter_clause)
+    
+    if ds_id is not None:
+        base_stmt = base_stmt.where(SysRole.ds_id == ds_id)
+        count_stmt = count_stmt.where(SysRole.ds_id == ds_id)
+    
+    if oid is not None:
+        base_stmt = base_stmt.where(SysRole.oid == oid)
+        count_stmt = count_stmt.where(SysRole.oid == oid)
     
     total = session.exec(count_stmt).one()
     
@@ -27,9 +35,11 @@ def list_roles(session: Session, page: int = 1, page_size: int = 20, keyword: Op
     return {"items": roles, "total": total, "page": page, "page_size": page_size}
 
 
-def get_all_roles(session: Session) -> list[SysRole]:
-    """Get all roles as a flat list."""
+def get_all_roles(session: Session, oid: Optional[int] = None) -> list[SysRole]:
+    """Get all roles as a flat list, optionally filtered by oid."""
     stmt = select(SysRole).order_by(SysRole.create_time)
+    if oid is not None:
+        stmt = stmt.where(SysRole.oid == oid)
     return list(session.exec(stmt).all())
 
 
@@ -54,7 +64,7 @@ def check_code_exists(session: Session, code: str, exclude_id: Optional[int] = N
     return session.exec(stmt).one() > 0
 
 
-def create_role(session: Session, name: str, code: str, description: Optional[str] = None) -> SysRole:
+def create_role(session: Session, name: str, code: str, description: Optional[str] = None, oid: int = 1) -> SysRole:
     """Create a new role."""
     if check_name_exists(session, name):
         raise ValueError(f"Role name '{name}' already exists")
@@ -66,6 +76,7 @@ def create_role(session: Session, name: str, code: str, description: Optional[st
         code=code,
         description=description,
         origin=0,
+        oid=oid,
         create_time=get_timestamp()
     )
     session.add(role)
@@ -80,7 +91,8 @@ def update_role(
     role_id: int,
     name: Optional[str] = None,
     code: Optional[str] = None,
-    description: Optional[str] = None
+    description: Optional[str] = None,
+    oid: Optional[int] = None
 ) -> SysRole:
     """Update a role."""
     role = session.get(SysRole, role_id)
@@ -101,6 +113,8 @@ def update_role(
         role.code = code
     if description is not None:
         role.description = description
+    if oid is not None:
+        role.oid = oid
     
     session.add(role)
     session.flush()
