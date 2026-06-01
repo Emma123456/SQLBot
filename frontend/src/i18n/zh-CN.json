@@ -113,7 +113,15 @@
     "save_failed": "保存失败",
     "workspace": "工作空间",
     "workspace_placeholder": "请选择工作空间",
-    "sync_datasource": "同步数据源"
+    "sync_datasource": "同步数据源",
+    "entity_user": "用户信息",
+    "entity_department": "部门信息",
+    "entity_role": "角色信息",
+    "entity_user_dept": "用户-部门关系",
+    "entity_user_role": "用户-角色关系",
+    "sync_entity_success": "同步{entity}成功",
+    "sync_entity_summary": "同步{entity}成功，新增{created}条，修改{updated}条，删除{deactivated}条",
+    "sync_entity_skipped": "，跳过{skipped}条（账号已存在: {accounts}）"
   },
   "parameter": {
     "execution_details": "执行详情",
@@ -269,7 +277,10 @@
     "or": "或者",
     "refresh": "刷新",
     "input_limit": "长度在 {0} 到 {1} 个字符",
-    "file_size_limit_error": "文件大小超出限制（最大{limit}）"
+    "file_size_limit_error": "文件大小超出限制（最大{limit}）",
+    "sync_readonly": "同步数据不可修改",
+    "sync_user_tooltip": "同步用户由外部数据源管理",
+    "sync_entity_tooltip": "同步数据由外部数据源管理"
   },
   "dashboard": {
     "open_dashboard": "打开仪表板",

@@ -80,6 +80,10 @@ async def update(session: SessionDep, current_user: CurrentUser, dto: RoleUpdate
     """Update a role. Admin only."""
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can update roles")
+    # Hybrid read-only: synced roles (origin=10) cannot be modified
+    role = get_role(session, dto.id)
+    if role and role.origin == 10:
+        raise HTTPException(status_code=403, detail="Synced roles cannot be modified")
     try:
         role = update_role(
             session,
@@ -100,6 +104,10 @@ async def delete(session: SessionDep, current_user: CurrentUser, role_id: int):
     """Delete a role. Admin only. Also removes user associations and refreshes role_ids."""
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can delete roles")
+    # Hybrid read-only: synced roles (origin=10) cannot be deleted
+    role = get_role(session, role_id)
+    if role and role.origin == 10:
+        raise HTTPException(status_code=403, detail="Synced roles cannot be deleted")
     try:
         affected_uids = delete_role(session, role_id)
         session.commit()
@@ -130,6 +138,10 @@ async def assign_users(
     """Assign users to a role. Admin only."""
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can assign users to roles")
+    # Hybrid read-only: synced roles (origin=10) cannot have users manually assigned
+    role = get_role(session, role_id)
+    if role and role.origin == 10:
+        raise HTTPException(status_code=403, detail="Cannot assign users to synced roles")
     try:
         affected_uids = assign_users_to_role(session, role_id, dto.user_ids)
         session.commit()
@@ -150,6 +162,10 @@ async def remove_users(
     """Remove users from a role. Admin only."""
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can users from roles")
+    # Hybrid read-only: synced roles (origin=10) cannot have users manually removed
+    role = get_role(session, role_id)
+    if role and role.origin == 10:
+        raise HTTPException(status_code=403, detail="Cannot remove users from synced roles")
     try:
         affected_uids = remove_users_from_role(session, role_id, dto.user_ids)
         session.commit()

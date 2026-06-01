@@ -193,6 +193,8 @@
     "name_exist": "Name exist",
     "name": "Name",
     "account": "Account",
-    "email": "Email"
+    "email": "Email",
+    "role": "Role",
+    "department": "Department"
   }
 }

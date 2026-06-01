@@ -113,7 +113,15 @@
     "save_failed": "Save failed",
     "workspace": "Workspace",
     "workspace_placeholder": "Select workspace",
-    "sync_datasource": "Sync Datasource"
+    "sync_datasource": "Sync Datasource",
+    "entity_user": "User",
+    "entity_department": "Department",
+    "entity_role": "Role",
+    "entity_user_dept": "User-Dept",
+    "entity_user_role": "User-Role",
+    "sync_entity_success": "Synced {entity} successfully",
+    "sync_entity_summary": "Synced {entity}, added {created}, modified {updated}, deleted {deactivated}",
+    "sync_entity_skipped": ", skipped {skipped} (account already exists: {accounts})"
   },
   "parameter": {
     "execution_details": "Execution Details",
@@ -269,7 +277,10 @@
     "or": "Or",
     "refresh": "Refresh",
     "input_limit": "Length cannot exceed {0} characters",
-    "file_size_limit_error": "File size exceeds the limit (maximum {limit})"
+    "file_size_limit_error": "File size exceeds the limit (maximum {limit})",
+    "sync_readonly": "Synced data is read-only",
+    "sync_user_tooltip": "Synced user is managed by external datasource",
+    "sync_entity_tooltip": "Synced entity is managed by external datasource"
   },
   "dashboard": {
     "open_dashboard": "Open Dashboard",

@@ -53,6 +53,7 @@
         <template #default="{ data }">
           <div class="tree-node">
             <span class="node-label">{{ data.name }}</span>
+            <el-tag v-if="data.origin === 10" size="small" type="warning" style="margin-left: 4px">{{ $t('user.db_sync') }}</el-tag>
             <span class="node-code">{{ data.code }}</span>
             <span class="node-workspace" v-if="data.oid">{{ getWorkspaceName(data.oid) }}</span>
             <div class="node-actions">
@@ -61,20 +62,25 @@
                   <icon_add_outlined />
                 </el-icon>
               </el-tooltip>
-              <el-tooltip effect="dark" :content="$t('datasource.edit')" placement="top">
-                <el-icon class="action-btn" size="14" @click.stop="handleEdit(data)">
-                  <IconOpeEdit />
-                </el-icon>
-              </el-tooltip>
-              <el-tooltip effect="dark" :content="$t('department.manageUsers')" placement="top">
-                <el-icon class="action-btn" size="14" @click.stop="handleManageUsers(data)">
-                  <icon_user_outlined />
-                </el-icon>
-              </el-tooltip>
-              <el-tooltip effect="dark" :content="$t('dashboard.delete')" placement="top">
-                <el-icon class="action-btn action-btn-danger" size="14" @click.stop="handleDelete(data)">
-                  <IconOpeDelete />
-                </el-icon>
+              <template v-if="data.origin !== 10">
+                <el-tooltip effect="dark" :content="$t('datasource.edit')" placement="top">
+                  <el-icon class="action-btn" size="14" @click.stop="handleEdit(data)">
+                    <IconOpeEdit />
+                  </el-icon>
+                </el-tooltip>
+                <el-tooltip effect="dark" :content="$t('department.manageUsers')" placement="top">
+                  <el-icon class="action-btn" size="14" @click.stop="handleManageUsers(data)">
+                    <icon_user_outlined />
+                  </el-icon>
+                </el-tooltip>
+                <el-tooltip effect="dark" :content="$t('dashboard.delete')" placement="top">
+                  <el-icon class="action-btn action-btn-danger" size="14" @click.stop="handleDelete(data)">
+                    <IconOpeDelete />
+                  </el-icon>
+                </el-tooltip>
+              </template>
+              <el-tooltip v-else effect="dark" :content="$t('common.sync_entity_tooltip')" placement="top">
+                <span style="color: #c0c4cc; font-size: 12px; margin-left: 4px">{{ $t('common.sync_readonly') }}</span>
               </el-tooltip>
             </div>
           </div>

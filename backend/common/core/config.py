@@ -1,3 +1,4 @@
+import os
 import secrets
 import urllib.parse
 from typing import Annotated, Any, Literal
@@ -31,7 +32,9 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "SQLBot"
     #CONTEXT_PATH: str = "/sqlbot"
     CONTEXT_PATH: str = ""
-    SECRET_KEY: str = secrets.token_urlsafe(32)
+    # SECRET_KEY should be set via environment variable for persistence across restarts
+    # If not set, generate a random one (but this will invalidate existing tokens on restart)
+    SECRET_KEY: str = os.environ.get("SECRET_KEY") or secrets.token_urlsafe(32)
     # 60 minutes * 24 hours * 8 days = 8 days
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
     FRONTEND_HOST: str = "http://localhost:5173"

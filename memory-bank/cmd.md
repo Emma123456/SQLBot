@@ -10,6 +10,8 @@ docker run -d --name sqlbot-pg -p 5432:5432 \
 cd backend
 uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
+uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload --log-level debug
+
 # 3. Start frontend (terminal 2)
 cd frontend
 npm install

@@ -113,7 +113,15 @@
     "save_failed": "저장 실패",
     "workspace": "워크스페이스",
     "workspace_placeholder": "워크스페이스를 선택하세요",
-    "sync_datasource": "동기화 데이터 소스"
+    "sync_datasource": "동기화 데이터 소스",
+    "entity_user": "사용자 정보",
+    "entity_department": "부서 정보",
+    "entity_role": "역할 정보",
+    "entity_user_dept": "사용자-부서 관계",
+    "entity_user_role": "사용자-역할 관계",
+    "sync_entity_success": "{entity} 동기화 성공",
+    "sync_entity_summary": "{entity} 동기화 성공, 추가 {created}건, 수정 {updated}건, 삭제 {deactivated}건",
+    "sync_entity_skipped": ", {skipped}건 건너뜀 (계정 이미 존재: {accounts})"
   },
   "parameter": {
     "execution_details": "실행 세부 정보",
@@ -269,7 +277,10 @@
     "or": "또는",
     "refresh": "새로고침",
     "input_limit": "길이는 {0}자에서 {1}자 사이여야 합니다",
-    "file_size_limit_error": "파일 크기가 제한을 초과했습니다 (최대 {limit})"
+    "file_size_limit_error": "파일 크기가 제한을 초과했습니다 (최대 {limit})",
+    "sync_readonly": "동기화 데이터는 읽기 전용입니다",
+    "sync_user_tooltip": "동기화 사용자는 외부 데이터 소스에서 관리됩니다",
+    "sync_entity_tooltip": "동기화 엔티티는 외부 데이터 소스에서 관리됩니다"
   },
   "dashboard": {
     "open_dashboard": "대시보드 열기",

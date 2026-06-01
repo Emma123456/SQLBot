@@ -273,8 +273,8 @@ def update_table_and_fields(session: SessionDep, data: TableObj):
         update_field(session, field)
 
     # do table embedding
-    run_save_table_embeddings([data.table.id])
-    run_save_ds_embeddings([data.table.ds_id])
+    run_save_table_embeddings([int(data.table.id)])
+    run_save_ds_embeddings([int(data.table.ds_id)])
 
 
 def updateTable(session: SessionDep, table: CoreTable):
@@ -301,7 +301,7 @@ def preview(session: SessionDep, current_user: CurrentUser, id: int, data: Table
     if not data.table.id:
         return {"fields": [], "data": [], "sql": ''}
 
-    fields = session.query(CoreField).filter(CoreField.table_id == data.table.id).order_by(
+    fields = session.query(CoreField).filter(CoreField.table_id == int(data.table.id)).order_by(
         CoreField.field_index.asc()).all()
 
     if fields is None or len(fields) == 0:

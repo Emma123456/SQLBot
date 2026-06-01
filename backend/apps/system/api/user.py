@@ -1,6 +1,6 @@
 from collections import defaultdict
 from typing import Optional
-from fastapi import APIRouter, File, Path, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Path, Query, UploadFile
 from sqlmodel import SQLModel, or_, select, delete as sqlmodel_delete
 from apps.system.crud.user import check_account_exists, check_email_exists, check_email_format, check_pwd_format, get_db_user, single_delete, user_ws_options
 from apps.system.crud.user_excel import batchUpload, downTemplate, download_error_file
@@ -219,6 +219,15 @@ async def update(session: SessionDep, editor: UserEditor, trans: Trans):
     user_model: UserModel = get_db_user(session = session, user_id = editor.id)
     if not user_model:
         raise Exception(f"User with id [{editor.id}] not found!")
+    
+    # Hybrid read-only: synced users (origin=10) can only update system_variables
+    if user_model.origin == 10:
+        data = editor.model_dump(exclude_unset=True)
+        if 'system_variables' in data:
+            user_model.system_variables = data['system_variables']
+        session.add(user_model)
+        return user_model
+    
     if editor.account != user_model.account:
         raise Exception(f"account cannot be changed!")
     """ if editor.email != user_model.email and check_email_exists(session=session, email=editor.email):
@@ -265,12 +274,20 @@ async def update(session: SessionDep, editor: UserEditor, trans: Trans):
     resource_id_expr="id"
 ))
 async def delete(session: SessionDep, id: int = Path(description=f"{PLACEHOLDER_PREFIX}uid")):
+    user_model: UserModel = get_db_user(session = session, user_id = id)
+    if user_model and user_model.origin == 10:
+        raise HTTPException(status_code=403, detail="Synced users cannot be deleted")
     await single_delete(session, id)
 
 @router.delete("", summary=f"{PLACEHOLDER_PREFIX}user_batchdel_api", description=f"{PLACEHOLDER_PREFIX}user_batchdel_api")
 @require_permissions(permission=SqlbotPermission(role=['admin']))
 @system_log(LogConfig(operation_type=OperationType.DELETE,module=OperationModules.USER,resource_id_expr="id_list"))
 async def batch_del(session: SessionDep, id_list: list[int]):
+    # Check for synced users before deleting any
+    for uid in id_list:
+        user_model: UserModel = get_db_user(session = session, user_id = uid)
+        if user_model and user_model.origin == 10:
+            raise HTTPException(status_code=403, detail=f"Synced users cannot be deleted (user id: {uid})")
     for id in id_list:
         await single_delete(session, id)
     

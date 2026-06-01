@@ -17,7 +17,9 @@ def get_db_user(*, session: Session, user_id: int) -> UserModel:
     return db_user
 
 def get_user_by_account(*, session: Session, account: str) -> BaseUserDTO | None:
-    statement = select(UserModel).where(UserModel.account == account)
+    # Order by create_time DESC to get the most recent user if duplicates exist
+    # This ensures consistent behavior even with duplicate accounts
+    statement = select(UserModel).where(UserModel.account == account).order_by(UserModel.create_time.desc())
     db_user = session.exec(statement).first()
     if not db_user:
         return None
@@ -43,6 +45,16 @@ async def get_user_info(*, session: Session, user_id: int) -> UserInfoDTO | None
     return userInfo
 
 def authenticate(*, session: Session, account: str, password: str) -> BaseUserDTO | None:
+    # Check for duplicate accounts and log warning
+    count_stmt = select(func.count(UserModel.id)).where(UserModel.account == account)
+    account_count = session.exec(count_stmt).one()
+    
+    if account_count > 1:
+        SQLBotLogUtil.warning(
+            f"Duplicate account detected: '{account}' has {account_count} records. "
+            f"Using the most recently created user. This indicates a data integrity issue that should be resolved."
+        )
+    
     db_user = get_user_by_account(session=session, account=account)
     if not db_user:
         return None

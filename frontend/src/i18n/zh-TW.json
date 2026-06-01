@@ -113,7 +113,15 @@
     "save_failed": "儲存失敗",
     "workspace": "工作空間",
     "workspace_placeholder": "請選擇工作空間",
-    "sync_datasource": "同步資料來源"
+    "sync_datasource": "同步資料來源",
+    "entity_user": "使用者資訊",
+    "entity_department": "部門資訊",
+    "entity_role": "角色資訊",
+    "entity_user_dept": "使用者-部門關係",
+    "entity_user_role": "使用者-角色關係",
+    "sync_entity_success": "同步{entity}成功",
+    "sync_entity_summary": "同步{entity}成功，新增{created}筆，修改{updated}筆，刪除{deactivated}筆",
+    "sync_entity_skipped": "，跳過{skipped}筆（帳號已存在: {accounts}）"
   },
   "parameter": {
     "execution_details": "執行詳情",
@@ -269,7 +277,10 @@
     "or": "或者",
     "refresh": "重新整理",
     "input_limit": "長度在 {0} 到 {1} 個字元",
-    "file_size_limit_error": "檔案大小超出限制（最大{limit}）"
+    "file_size_limit_error": "檔案大小超出限制（最大{limit}）",
+    "sync_readonly": "同步資料不可修改",
+    "sync_user_tooltip": "同步用戶由外部資料來源管理",
+    "sync_entity_tooltip": "同步資料由外部資料來源管理"
   },
   "dashboard": {
     "open_dashboard": "開啟儀表板",

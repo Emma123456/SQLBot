@@ -98,7 +98,12 @@
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="45" />
-        <el-table-column prop="name" show-overflow-tooltip :label="$t('user.name')" min-width="120" />
+        <el-table-column prop="name" show-overflow-tooltip :label="$t('user.name')" min-width="120">
+          <template #default="scope">
+            {{ scope.row.name }}
+            <el-tag v-if="scope.row.origin === 10" size="small" type="warning" style="margin-left: 4px">{{ $t('user.db_sync') }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column
           prop="account"
           show-overflow-tooltip
@@ -168,6 +173,7 @@
                 :active-value="1"
                 :inactive-value="0"
                 size="small"
+                :disabled="scope.row.origin === 10"
                 @change="statusHandler(scope.row)"
               />
               <div class="line"></div>
@@ -241,12 +247,24 @@
               </el-popover>
 
               <el-tooltip
+                v-if="scope.row.origin !== 10"
                 :offset="14"
                 effect="dark"
                 :content="$t('dashboard.delete')"
                 placement="top"
               >
                 <el-icon class="action-btn" size="16" @click="deleteHandler(scope.row)">
+                  <IconOpeDelete></IconOpeDelete>
+                </el-icon>
+              </el-tooltip>
+              <el-tooltip
+                v-else
+                :offset="14"
+                effect="dark"
+                :content="$t('common.sync_user_tooltip')"
+                placement="top"
+              >
+                <el-icon class="action-btn" size="16" style="color: #c0c4cc; cursor: not-allowed">
                   <IconOpeDelete></IconOpeDelete>
                 </el-icon>
               </el-tooltip>
@@ -329,6 +347,7 @@
       <el-form-item prop="name" :label="t('user.name')">
         <el-input
           v-model="state.form.name"
+          :disabled="state.form.origin === 10"
           :placeholder="$t('datasource.please_enter') + $t('common.empty') + $t('user.name')"
           autocomplete="off"
           maxlength="50"
@@ -348,6 +367,7 @@
       <el-form-item prop="email" :label="$t('user.email')">
         <el-input
           v-model="state.form.email"
+          :disabled="state.form.origin === 10"
           :placeholder="$t('datasource.please_enter') + $t('common.empty') + $t('user.email')"
           autocomplete="off"
           clearable
@@ -400,6 +420,7 @@
         <el-select
           v-model="state.form.oid_list"
           multiple
+          :disabled="state.form.origin === 10"
           :placeholder="$t('datasource.Please_select') + $t('common.empty') + $t('user.workspace')"
         >
           <el-option v-for="item in options" :key="item.id" :label="item.name" :value="item.id">
@@ -553,7 +574,7 @@
         </div>
       </el-form-item>
       <el-form-item :label="$t('user.user_status')">
-        <el-switch v-model="state.form.status" :active-value="1" :inactive-value="0" />
+        <el-switch v-model="state.form.status" :active-value="1" :inactive-value="0" :disabled="state.form.origin === 10" />
       </el-form-item>
 
       <el-form-item>

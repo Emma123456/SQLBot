@@ -193,6 +193,8 @@
     "name_exist": "变量名称已存在",
     "name": "姓名",
     "account": "账号",
-    "email": "邮箱"
+    "email": "邮箱",
+    "role": "角色",
+    "department": "部门"
   }
 }

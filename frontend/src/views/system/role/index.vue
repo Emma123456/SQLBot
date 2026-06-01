@@ -49,7 +49,12 @@
     </div>
 
     <el-table :data="tableData" style="width: 100%" v-loading="loading">
-      <el-table-column prop="name" :label="$t('role.name')" min-width="140" />
+      <el-table-column prop="name" :label="$t('role.name')" min-width="140">
+        <template #default="{ row }">
+          {{ row.name }}
+          <el-tag v-if="row.origin === 10" size="small" type="warning" style="margin-left: 4px">{{ $t('user.db_sync') }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="code" :label="$t('role.code')" min-width="140" />
       <el-table-column prop="description" :label="$t('role.description')" min-width="200" show-overflow-tooltip />
       <el-table-column :label="$t('role.workspace')" min-width="120">
@@ -59,19 +64,25 @@
       </el-table-column>
       <el-table-column :label="$t('role.users')" width="100">
         <template #default="{ row }">
-          <el-button link type="primary" @click="handleManageUsers(row)">
+          <el-button v-if="row.origin !== 10" link type="primary" @click="handleManageUsers(row)">
             {{ $t('role.manageUsers') }}
           </el-button>
+          <span v-else style="color: #c0c4cc">-</span>
         </template>
       </el-table-column>
       <el-table-column :label="$t('ds.actions')" width="140" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="handleEdit(row)">
-            {{ $t('datasource.edit') }}
-          </el-button>
-          <el-button link type="danger" @click="handleDelete(row)">
-            {{ $t('dashboard.delete') }}
-          </el-button>
+          <template v-if="row.origin !== 10">
+            <el-button link type="primary" @click="handleEdit(row)">
+              {{ $t('datasource.edit') }}
+            </el-button>
+            <el-button link type="danger" @click="handleDelete(row)">
+              {{ $t('dashboard.delete') }}
+            </el-button>
+          </template>
+          <el-tooltip v-else :content="$t('common.sync_entity_tooltip')" placement="top">
+            <span style="color: #c0c4cc; font-size: 12px">{{ $t('common.sync_readonly') }}</span>
+          </el-tooltip>
         </template>
       </el-table-column>
     </el-table>

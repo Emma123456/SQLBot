@@ -594,6 +594,21 @@ BigInt ID 问题的三次 Bug 都是不同表面的 workaround（`String()` 包�
 
 **教训**：第二次出现同类问题时，花时间做根因分析并系统修复，而非继续打补丁。
 
+### 17. xpack 编译模型新增列必须通过原生 SQL 访问
+
+`DsRules` 等编译在 xpack `.so` 中的模型，无法通过 `getattr()` 访问后续通过迁移新增的数据库列（如 `role_list`、`dept_list`），因为 ORM 只加载模型定义的字段。`getattr(rule, 'role_list', None)` 始终返回 `None`，导致按角色/部门分配的权限规则静默失效。
+
+**正确方式**：使用 `sqlalchemy.text()` 原生 SQL 读取新增列：
+
+```python
+from sqlalchemy import text
+results = session.execute(text("SELECT id, role_list, dept_list FROM ds_rules")).all()
+targets = {row.id: (json.loads(row.role_list) if row.role_list else [],
+                     json.loads(row.dept_list) if row.dept_list else []) for row in results}
+```
+
+**教训**：任何 xpack 编译模型表上后加的列，都不能通过 ORM 属性访问，必须走原生 SQL。项目内 `permission_rule.py` API 端点已使用此模式。
+
 ---
 
 ## 最终说明

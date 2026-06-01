@@ -193,6 +193,8 @@
     "name_exist": "變數名稱已存在",
     "name": "姓名",
     "account": "帳號",
-    "email": "郵箱"
+    "email": "郵箱",
+    "role": "角色",
+    "department": "部門"
   }
 }

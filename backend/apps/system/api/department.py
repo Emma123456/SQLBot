@@ -67,6 +67,10 @@ async def update(session: SessionDep, current_user: CurrentUser, dto: Department
     """Update a department. Admin only."""
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can update departments")
+    # Hybrid read-only: synced departments (origin=10) cannot be modified
+    dept = get_department(session, dto.id)
+    if dept and dept.origin == 10:
+        raise HTTPException(status_code=403, detail="Synced departments cannot be modified")
     try:
         dept = update_department(
             session,
@@ -87,6 +91,10 @@ async def delete(session: SessionDep, current_user: CurrentUser, dept_id: int):
     """Delete a department. Admin only. Only leaf departments without users can be deleted."""
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can delete departments")
+    # Hybrid read-only: synced departments (origin=10) cannot be deleted
+    dept = get_department(session, dept_id)
+    if dept and dept.origin == 10:
+        raise HTTPException(status_code=403, detail="Synced departments cannot be deleted")
     try:
         delete_department(session, dept_id)
         session.commit()
@@ -114,6 +122,10 @@ async def assign_users(
     """Assign users to a department. Admin only."""
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can assign users to departments")
+    # Hybrid read-only: synced departments (origin=10) cannot have users manually assigned
+    dept = get_department(session, dept_id)
+    if dept and dept.origin == 10:
+        raise HTTPException(status_code=403, detail="Cannot assign users to synced departments")
     try:
         affected_uids = assign_users_to_department(session, dept_id, dto.user_ids, dto.is_primary)
         session.commit()
@@ -134,6 +146,10 @@ async def remove_users(
     """Remove users from a department. Admin only."""
     if not current_user.isAdmin:
         raise HTTPException(status_code=403, detail="Only admin can remove users from departments")
+    # Hybrid read-only: synced departments (origin=10) cannot have users manually removed
+    dept = get_department(session, dept_id)
+    if dept and dept.origin == 10:
+        raise HTTPException(status_code=403, detail="Cannot remove users from synced departments")
     try:
         affected_uids = remove_users_from_department(session, dept_id, dto.user_ids)
         session.commit()

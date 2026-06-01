@@ -202,14 +202,67 @@ def upsert_roles(
     return code_to_id, created, updated
 
 
+def check_duplicate_accounts(
+    session: Session,
+    ext_rows: list[dict],
+    origin: int = 10,
+    ds_id: int = 0,
+) -> list[str]:
+    """Check if any accounts in external data already exist in the database.
+    
+    A true duplicate is when:
+    - Account exists in the database
+    - AND the existing user's platform_uid does NOT match the current ext_id
+    
+    This allows update operations (same ext_id) while catching actual conflicts
+    (different ext_id trying to use the same account).
+    
+    Returns:
+        List of duplicate account names found. Empty list if no duplicates.
+    """
+    duplicate_accounts = []
+    
+    for row in ext_rows:
+        ext_id = _clean(row.get("id"))
+        name = _clean(row.get("name"), default=f"sync_user")
+        account = _clean(row.get("account"))
+        
+        if not account:
+            account = name
+        
+        if not ext_id or not account:
+            continue
+        
+        # Check if account already exists
+        existing_user = session.exec(
+            select(UserModel).where(UserModel.account == account)
+        ).first()
+        
+        if existing_user:
+            # Account exists - check if this is the same user (update) or a conflict
+            platform = session.exec(
+                select(UserPlatformModel).where(
+                    UserPlatformModel.uid == existing_user.id,
+                    UserPlatformModel.origin == origin,
+                    UserPlatformModel.ds_id == ds_id,
+                )
+            ).first()
+            
+            # If no platform record exists OR platform_uid doesn't match, it's a true duplicate
+            if not platform or platform.platform_uid != ext_id:
+                duplicate_accounts.append(account)
+    
+    return list(set(duplicate_accounts))  # Remove duplicates
+
+
 def upsert_users(
     session: Session,
     ext_rows: list[dict],
     origin: int = 10,
     ds_id: int = 0,
     oid: int = 1,
-) -> tuple[dict[str, int], int, int]:
-    """Upsert users by platform_uid+ds_id. Returns (platform_uid->internal_id map, created_count, updated_count).
+) -> tuple[dict[str, int], int, int, list[str]]:
+    """Upsert users by platform_uid+ds_id. Returns (platform_uid->internal_id map, created_count, updated_count, skipped_accounts).
 
     Args:
         ds_id: Sync datasource ID for multi-source isolation.
@@ -218,6 +271,7 @@ def upsert_users(
     uid_map: dict[str, int] = {}
     created = 0
     updated = 0
+    skipped_accounts: list[str] = []
 
     for row in ext_rows:
         ext_id = _clean(row.get("id"))
@@ -266,6 +320,27 @@ def upsert_users(
             uid_map[ext_id] = platform.uid
             updated += 1
         else:
+            # Check if account already exists (potential conflict with non-sync user)
+            existing_user = session.exec(
+                select(UserModel).where(UserModel.account == account)
+            ).first()
+            
+            if existing_user:
+                # Account exists - check if it belongs to current data source
+                platform = session.exec(
+                    select(UserPlatformModel).where(
+                        UserPlatformModel.uid == existing_user.id,
+                        UserPlatformModel.origin == origin,
+                        UserPlatformModel.ds_id == ds_id,
+                    )
+                ).first()
+                
+                # If no platform record or platform_uid doesn't match, skip this user
+                if not platform or platform.platform_uid != ext_id:
+                    skipped_accounts.append(account)
+                    logger.warning(f"Skipping user '{account}' (ext_id={ext_id}): account already exists in database")
+                    continue
+            
             # Create new user + platform record
             from common.core.security import default_md5_pwd
             new_uid = snowflake.generate_id()
@@ -300,7 +375,7 @@ def upsert_users(
             uid_map[ext_id] = new_uid
             created += 1
 
-    return uid_map, created, updated
+    return uid_map, created, updated, skipped_accounts
 
 
 # ── relation sync ───────────────────────────────────────────────
@@ -607,11 +682,16 @@ def run_sync(session: Session, ds_id: int) -> dict:
         user_mapping = mapping_map.get("user")
         if user_mapping and user_mapping.enabled and user_mapping.table_name:
             ext_users = read_external_table(engine, user_mapping.table_name)
-            user_map, created, updated = upsert_users(session, ext_users, ds_id=ds.id, oid=ds.oid)
+            user_map, created, updated, skipped_accounts = upsert_users(session, ext_users, origin=10, ds_id=ds.id, oid=ds.oid)
             summary["created"] += created
             summary["updated"] += updated
             summary["user_created"] = created
             summary["user_updated"] = updated
+            summary["user_skipped"] = len(skipped_accounts)
+            if skipped_accounts:
+                summary["skipped_accounts"] = skipped_accounts[:5]
+                suffix = "..." if len(skipped_accounts) > 5 else ""
+                logger.warning(f"Skipped {len(skipped_accounts)} user(s) due to account conflicts: {', '.join(skipped_accounts[:5])}{suffix}")
 
         # 4. Sync user-department relations
         ud_mapping = mapping_map.get("user_dept")

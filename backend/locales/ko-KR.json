@@ -193,6 +193,8 @@
     "name_exist": "변수 이름이 이미 존재합니다",
     "name": "이름",
     "account": "계정",
-    "email": "이메일"
+    "email": "이메일",
+    "role": "역할",
+    "department": "부서"
   }
 }

@@ -261,6 +261,8 @@ def userHaveVariable(user_variables: List, sys_variable: SystemVariable):
 def getSysVariableValue(sys_variable: SystemVariable, current_user: CurrentUser, ds: CoreDatasource, field: CoreField,
                         item: Dict, ):
     v = None
+    is_multi_value = False  # Flag for role/department (array types)
+    
     if getattr(sys_variable, 'value_type', None) == 'user_attr':
         key = sys_variable.value[0]
         user_sys_vars = current_user.system_variables or []
@@ -271,9 +273,38 @@ def getSysVariableValue(sys_variable: SystemVariable, current_user: CurrentUser,
         v = current_user.account
     elif sys_variable.value[0] == 'email':
         v = current_user.email
+    elif sys_variable.value[0] == 'role':
+        # Role IDs: multi-value array from current_user.role_ids
+        v = current_user.role_ids or []
+        is_multi_value = True
+    elif sys_variable.value[0] == 'department':
+        # Department IDs: multi-value array from current_user.dept_ids
+        v = current_user.dept_ids or []
+        is_multi_value = True
 
     if v is None:
         return None
+    
+    # Handle multi-value (role/department) - must use IN or NOT IN
+    if is_multi_value:
+        if not v or len(v) == 0:
+            return None  # No roles/departments assigned
+        
+        # For IN/NOT IN with array values
+        if item['term'] in ('in', 'not in'):
+            is_nvarchar = ds.type == 'sqlServer' and (
+                field.field_type == 'nchar' or field.field_type == 'NCHAR' or 
+                field.field_type == 'nvarchar' or field.field_type == 'NVARCHAR')
+            q = "N'" if is_nvarchar else "'"
+            # Build IN clause: ('val1', 'val2', 'val3')
+            whereValue = "(" + ", ".join(f"{q}{val}'" for val in v) + ")"
+            return whereValue
+        else:
+            # For other operators (shouldn't happen for role/dept, but handle gracefully)
+            # Use first value as fallback
+            v = str(v[0]) if v else None
+            if v is None:
+                return None
 
     whereValue = ''
     if item['term'] == 'null':

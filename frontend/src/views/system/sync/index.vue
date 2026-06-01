@@ -159,13 +159,9 @@
     </el-dialog>
 
     <!-- Sync result dialog -->
-    <el-dialog v-model="syncResultVisible" :title="$t('sync.sync_result')" width="480px">
+    <el-dialog v-model="syncResultVisible" :title="$t('sync.sync_result')" width="560px">
       <div v-if="syncSummary" class="sync-result">
-        <el-descriptions :column="1" border>
-          <el-descriptions-item :label="$t('sync.created')">{{ syncSummary.created || 0 }}</el-descriptions-item>
-          <el-descriptions-item :label="$t('sync.updated')">{{ syncSummary.updated || 0 }}</el-descriptions-item>
-          <el-descriptions-item :label="$t('sync.deactivated')">{{ syncSummary.deactivated || 0 }}</el-descriptions-item>
-        </el-descriptions>
+        <p style="margin-bottom: 12px; white-space: pre-line">{{ formatSummary(syncSummary) }}</p>
       </div>
     </el-dialog>
 
@@ -290,10 +286,42 @@ function formatTime(ts: number): string {
 }
 
 function formatSummary(summary: Record<string, number>): string {
-  return Object.entries(summary)
-    .filter(([, v]) => v > 0)
-    .map(([k, v]) => `${k}: ${v}`)
-    .join(', ')
+  const entityTypes = [
+    { key: 'user', i18nKey: 'entity_user' },
+    { key: 'dept', i18nKey: 'entity_department' },
+    { key: 'role', i18nKey: 'entity_role' },
+    { key: 'user_dept', i18nKey: 'entity_user_dept' },
+    { key: 'user_role', i18nKey: 'entity_user_role' },
+  ]
+  const parts: string[] = []
+  for (const et of entityTypes) {
+    const created = summary[`${et.key}_created`] ?? 0
+    const updated = summary[`${et.key}_updated`] ?? 0
+    const deactivated = summary[`${et.key}_deactivated`] ?? 0
+    const synced = summary[`${et.key}_synced`] ?? 0
+    const skipped = summary[`${et.key}_skipped`] ?? 0
+    const hasChanges = created > 0 || updated > 0 || deactivated > 0 || synced > 0 || skipped > 0
+    if (!hasChanges) continue
+    const entityName = t(`sync.${et.i18nKey}`)
+    if (synced > 0) {
+      // Relation entities only have synced count
+      parts.push(t('sync.sync_entity_success', { entity: entityName }))
+    } else {
+      let msg = t('sync.sync_entity_summary', {
+        entity: entityName,
+        created,
+        updated,
+        deactivated,
+      })
+      if (skipped > 0) {
+        const skippedAccounts: string[] = ((summary as any).skipped_accounts ?? []).slice(0, 5)
+        const suffix = skipped > 5 ? '...' : ''
+        msg += t('sync.sync_entity_skipped', { skipped, accounts: skippedAccounts.join(', ') + suffix })
+      }
+      parts.push(msg)
+    }
+  }
+  return parts.length > 0 ? parts.join('; ') : '-'
 }
 
 function resetForm() {
@@ -399,19 +427,6 @@ async function handleDelete(ds: SyncDatasource) {
     await loadDatasources()
   } catch {
     // cancelled or error
-  }
-}
-
-async function handleTestConnection(ds: SyncDatasource) {
-  try {
-    const result = await syncApi.testConnection(ds.id)
-    if (result?.success) {
-      ElMessage.success(t('sync.connection_success'))
-    } else {
-      ElMessage.error(result?.message || t('sync.connection_failed'))
-    }
-  } catch (e: any) {
-    ElMessage.error(e.message || t('sync.connection_failed'))
   }
 }
 

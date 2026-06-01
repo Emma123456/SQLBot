@@ -1,7 +1,7 @@
 import json
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import and_
+from sqlalchemy import and_, text
 from sqlbot_xpack.permissions.api.permission import transRecord2DTO
 from sqlbot_xpack.permissions.models.ds_permission import DsPermission, PermissionDTO
 from sqlbot_xpack.permissions.models.ds_rules import DsRules
@@ -11,9 +11,30 @@ from apps.datasource.models.datasource import CoreDatasource, CoreField, CoreTab
 from common.core.deps import CurrentUser, SessionDep
 
 
-def match_rule(rule: DsRules, current_user: CurrentUser, permission_id: int) -> bool:
+def _load_rule_targets(session: SessionDep) -> Dict[int, Tuple[list, list]]:
+    """Load role_list and dept_list for all ds_rules via raw SQL.
+
+    DsRules is a compiled xpack model that does not expose role_list/dept_list
+    as Python attributes. We must read them from the database directly.
+
+    Returns:
+        Dict mapping rule_id -> (role_list, dept_list)
+    """
+    results = session.execute(
+        text("SELECT id, role_list, dept_list FROM ds_rules")
+    ).all()
+    targets: Dict[int, Tuple[list, list]] = {}
+    for row in results:
+        r_list = json.loads(row.role_list) if row.role_list else []
+        d_list = json.loads(row.dept_list) if row.dept_list else []
+        targets[row.id] = (r_list, d_list)
+    return targets
+
+
+def match_rule(rule: DsRules, current_user: CurrentUser, permission_id: int,
+               rule_targets: Optional[Dict[int, Tuple[list, list]]] = None) -> bool:
     """Check if a rule matches the current user for a given permission.
-    
+
     A rule matches when:
     1. The permission_id is in the rule's permission_list, AND
     2. Any of the following is true (OR semantics):
@@ -30,17 +51,23 @@ def match_rule(rule: DsRules, current_user: CurrentUser, permission_id: int) -> 
     if u_list and (current_user.id in u_list or f'{current_user.id}' in u_list):
         return True
 
-    # Check role_list (use getattr for xpack compatibility)
-    role_list_raw = getattr(rule, 'role_list', None)
-    r_list = json.loads(role_list_raw) if role_list_raw else []
+    # Check role_list and dept_list from raw SQL (xpack model has no these attrs)
+    if rule_targets and rule.id in rule_targets:
+        r_list, d_list = rule_targets[rule.id]
+    else:
+        # Fallback: try getattr (won't work for xpack compiled models, but safe)
+        role_list_raw = getattr(rule, 'role_list', None)
+        r_list = json.loads(role_list_raw) if role_list_raw else []
+        dept_list_raw = getattr(rule, 'dept_list', None)
+        d_list = json.loads(dept_list_raw) if dept_list_raw else []
+
+    # Check role_list
     if r_list:
         user_role_ids = getattr(current_user, 'role_ids', None) or []
         if any(rid in user_role_ids for rid in r_list):
             return True
 
-    # Check dept_list (use getattr for xpack compatibility)
-    dept_list_raw = getattr(rule, 'dept_list', None)
-    d_list = json.loads(dept_list_raw) if dept_list_raw else []
+    # Check dept_list
     if d_list:
         user_dept_ids = getattr(current_user, 'dept_ids', None) or []
         if any(did in user_dept_ids for did in d_list):
@@ -61,6 +88,8 @@ def get_row_permission_filters(session: SessionDep, current_user: CurrentUser, d
     filters = []
     if is_normal_user(current_user):
         contain_rules = session.query(DsRules).all()
+        # Pre-load role_list/dept_list via raw SQL (xpack model lacks these attrs)
+        rule_targets = _load_rule_targets(session)
         for table in table_list:
             row_permissions = session.query(DsPermission).filter(
                 and_(DsPermission.table_id == table.id, DsPermission.type == 'row')).all()
@@ -70,7 +99,7 @@ def get_row_permission_filters(session: SessionDep, current_user: CurrentUser, d
                     # check permission and user in same rules (with role/dept support)
                     flag = False
                     for r in contain_rules:
-                        if match_rule(r, current_user, permission.id):
+                        if match_rule(r, current_user, permission.id, rule_targets):
                             flag = True
                             break
                     if flag:
@@ -84,6 +113,8 @@ def get_row_permission_filters(session: SessionDep, current_user: CurrentUser, d
 def get_column_permission_fields(session: SessionDep, current_user: CurrentUser, table: CoreTable,
                                  fields: list[CoreField], contain_rules: list[DsRules]):
     if is_normal_user(current_user):
+        # Pre-load role_list/dept_list via raw SQL (xpack model lacks these attrs)
+        rule_targets = _load_rule_targets(session)
         column_permissions = session.query(DsPermission).filter(
             and_(DsPermission.table_id == table.id, DsPermission.type == 'column')).all()
         if column_permissions is not None:
@@ -91,7 +122,7 @@ def get_column_permission_fields(session: SessionDep, current_user: CurrentUser,
                 # check permission and user in same rules (with role/dept support)
                 flag = False
                 for r in contain_rules:
-                    if match_rule(r, current_user, permission.id):
+                    if match_rule(r, current_user, permission.id, rule_targets):
                         flag = True
                         break
                 if flag:

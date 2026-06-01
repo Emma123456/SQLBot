@@ -144,7 +144,7 @@ SQLBot 的行权限系统通过 `ds_rules` 表将权限规则分配给用户，`
 | `name` | varchar(128) | 角色名称（唯一） |
 | `code` | varchar(128) | 角色编码，用于外部同步映射（唯一） |
 | `description` | varchar(512) | 描述（可选） |
-| `origin` | int | 来源：0=手动, 1=钉钉, 2=企微, 3=LDAP, 4=数据库同步 |
+| `origin` | int | 来源：0=手动, 1=钉钉, 2=企微, 3=LDAP, 10=数据库同步 |
 | `status` | int | 状态：0=正常, 9=已失效（软删除） |
 | `create_time` | BigInteger | 创建时间戳 |
 
@@ -156,7 +156,7 @@ SQLBot 的行权限系统通过 `ds_rules` 表将权限规则分配给用户，`
 | `name` | varchar(128) | 部门名称 |
 | `code` | varchar(128) | 部门编码，用于外部同步映射（唯一） |
 | `parent_id` | BigInteger | 父部门ID（0=根节点） |
-| `origin` | int | 来源：0=手动, 1=钉钉, 2=企微, 3=LDAP, 4=数据库同步 |
+| `origin` | int | 来源：0=手动, 1=钉钉, 2=企微, 3=LDAP, 10=数据库同步 |
 | `status` | int | 状态：0=正常, 9=已失效（软删除） |
 | `create_time` | BigInteger | 创建时间戳 |
 
@@ -527,11 +527,11 @@ def refresh_user_dept_ids(session: Session, uid: int):
 
 | 实体 | 匹配键 | 首次同步 | 后续同步 |
 |------|--------|---------|----------|
-| 用户 | `(platform_uid, origin, ds_id)` | 创建用户（snowflake ID，`account` 取外部 account 列，缺省回退 `sync_{ext_id}`）+ 写入 `sys_user_platform(platform_uid=外部id, origin=4, ds_id=数据源ID)` | 通过 `(platform_uid, origin, ds_id)` 查找 → 更新 name/email/account，**ID 不变** |
+| 用户 | `(platform_uid, origin, ds_id)` | 创建用户（snowflake ID，`account` 取外部 account 列，缺省回退 `sync_{ext_id}`）+ 写入 `sys_user_platform(platform_uid=外部id, origin=10, ds_id=数据源ID)` | 通过 `(platform_uid, origin, ds_id)` 查找 → 更新 name/email/account，**ID 不变** |
 | 角色 | `(code, ds_id)` | 按 code+ds_id 创建（snowflake ID） | 按 code+ds_id 查找 → 更新 name，**ID 不变** |
 | 部门 | `(code, ds_id)` | 按 code+ds_id 创建（snowflake ID） | 按 code+ds_id 查找 → 更新 name/parent_id，**ID 不变** |
 
-`origin` 枚举扩展：0=手动, 1=钉钉, 2=企微, 3=LDAP, **4=数据库同步**
+`origin` 枚举扩展：0=手动, 1=钉钉, 2=企微, 3=LDAP, **10=数据库同步**
 
 #### 8.4.1 多数据源 ID 冲突问题
 
@@ -558,11 +558,11 @@ def refresh_user_dept_ids(session: Session, uid: int):
 
 手动创建的实体（origin=0）`ds_id=0`，同步创建的实体 `ds_id=sync_datasource.id`。
 
-**mark_inactive 也必须按 ds_id 隔离**：只标记 `origin=4 AND ds_id=当前数据源ID` 且不在本次同步数据中的实体为 status=9，不影响其他数据源的实体。
+**mark_inactive 也必须按 ds_id 隔离**：只标记 `origin=10 AND ds_id=当前数据源ID` 且不在本次同步数据中的实体为 status=9，不影响其他数据源的实体。
 
 ### 8.5 删除处理 — 软删除（标记失效）
 
-外部数据中不存在的实体（但 SQLBot 中 `origin=4 AND ds_id=当前数据源ID` 的），标记为“已失效”，不物理删除：
+外部数据中不存在的实体（但 SQLBot 中 `origin=10 AND ds_id=当前数据源ID` 的），标记为"已失效"，不物理删除：
 
 | 实体 | 失效标记方式 |
 |------|------------|
@@ -572,7 +572,42 @@ def refresh_user_dept_ids(session: Session, uid: int):
 
 > status=0 表示正常，status=9 表示已失效。失效的实体不参与权限匹配，但保留在数据库中，避免破坏权限规则引用。
 
-### 8.6 定时同步 — APScheduler
+### 8.6 同步数据的混合只读策略
+
+当管理员通过用户管理界面操作同步数据（origin=10）时，采用**混合只读策略**：
+
+- **外部管理的字段**（来自同步数据源）：管理员不可修改、不可删除，仅可查看
+- **SQLBot 本地字段**（无外部对应）：管理员可正常编辑
+
+#### 字段级权限
+
+| 字段 | 来源 | 管理员可编辑？ |
+|------|------|---------------|
+| name, email, account | 外部同步 | ❌ 只读 |
+| dept_ids（部门） | 外部同步 | ❌ 只读 |
+| role_ids（角色） | 外部同步 | ❌ 只读 |
+| workspace（oid） | 同步数据源配置 | ❌ 只读 |
+| system_variables | SQLBot 本地 | ✅ 可编辑 |
+| password | SQLBot 本地 | ✅ 可重置 |
+
+#### 同步角色和部门
+
+同步的角色（`SysRole.origin=10`）和部门（`SysDepartment.origin=10`）同样遵循只读策略：管理员仅可查看，不可编辑或删除。如需修改，必须在同步数据源中更改后重新同步。
+
+#### 后端执行
+
+- 用户更新 API：检查 `origin` 字段，若为 `10` 则拒绝修改外部管理字段（name, email, account, dept_ids, role_ids, oid），返回 `403`
+- 用户删除 API：检查 `origin` 字段，若为 `10` 则拒绝删除，返回 `403`
+- 角色/部门更新和删除 API：检查 `origin` 字段，若为 `10` 则拒绝操作，返回 `403`
+
+#### 前端展示
+
+- 同步用户在列表中显示"同步"标签（origin 标签）
+- 同步用户的编辑表单中，外部管理字段为禁用/只读状态，本地字段仍可编辑
+- 同步用户的删除按钮隐藏，tooltip 提示"同步用户由外部数据源管理"
+- 同步角色/部门的编辑和删除按钮隐藏
+
+### 8.7 定时同步 — APScheduler
 
 使用 APScheduler（AsyncIOScheduler）集成到 FastAPI 应用中：
 
@@ -581,7 +616,7 @@ def refresh_user_dept_ids(session: Session, uid: int):
 - 修改 cron 表达式时动态更新 scheduler job
 - 预设选项：每 30 分钟 / 每 1 小时 / 每天 / 自定义 cron
 
-### 8.7 同步执行流程
+### 8.8 同步执行流程
 
 1. 连接外部 MySQL（`sqlalchemy.create_engine`）
 2. 读取 5 张映射表的数据
@@ -590,10 +625,10 @@ def refresh_user_dept_ids(session: Session, uid: int):
 5. **Upsert 用户**（by platform_uid + ds_id）→ 设置 `oid=ds.oid`，创建 `sys_user_ws` 记录 → 构建外部 id → 内部 ID 映射表
 6. **更新用户-部门关系**（by 映射表）→ 刷新受影响用户的 `dept_ids`
 7. **更新用户-角色关系**（by 映射表）→ 刷新受影响用户的 `role_ids`
-8. **标记失效**：origin=4 AND ds_id=当前数据源 且不在本次同步数据中的实体 → status=9
+8. **标记失效**：origin=10 AND ds_id=当前数据源 且不在本次同步数据中的实体 → status=9
 9. 写入 `sync_log`，返回同步摘要 `{created: N, updated: M, deactivated: K}`
 
-#### 8.7.1 工作空间绑定
+#### 8.8.1 工作空间绑定
 
 同步数据源配置时指定 `oid`（工作空间 ID）。同步用户时：
 
@@ -604,7 +639,7 @@ def refresh_user_dept_ids(session: Session, uid: int):
 
 > `oid` 默认值为 `1`（默认工作空间），确保未指定工作空间的同步仍能正常工作。
 
-### 8.8 前端同步 UI
+### 8.9 前端同步 UI
 
 在系统管理下新增**“同步配置”**页面（`/system/sync/index.vue`），包含：
 
@@ -619,7 +654,7 @@ def refresh_user_dept_ids(session: Session, uid: int):
 
 ---
 
-### 8.9 外部表示例
+### 8.10 外部表示例
 ```
 -- t_user
 CREATE TABLE t_user (
@@ -843,7 +878,8 @@ def upgrade():
 | **冗余数据漂移** | `sys_user` 上的 `role_ids`/`dept_ids` 与关联表不同步 | 每个变更路径（CRUD、同步、删除）都调用刷新函数。未来可加定期一致性检查任务 |
 | **向后兼容** | 现有 `ds_rules` 无 `role_list`/`dept_list` | 默认 `[]`，现有规则行为不变 |
 | **部门删除有子节点** | 子部门变为孤立 | v1 仅允许删除叶子节点。未来支持递归重分配或级联 |
-| **同步冲突** | 外部源重命名/删除了被权限规则引用的实体 | 同步仅新增/更新，不自动删除被 `ds_rules.role_list`/`dept_list` 引用的实体，改为标记“已失效” |
+| **同步冲突** | 外部源重命名/删除了被权限规则引用的实体 | 同步仅新增/更新，不自动删除被 `ds_rules.role_list`/`dept_list` 引用的实体，改为标记"已失效" |
+| **管理员修改同步数据** | 管理员修改同步用户的部门/角色后，下次同步覆盖手动修改 | 混合只读策略：同步数据（origin=10）的外部管理字段管理员不可修改，消除冲突源头（§8.6） |
 | **多数据源 ID 冲突** | 不同外部数据库有相同主键值，导致数据覆盖或误删除 | 所有同步实体增加 `ds_id` 隔离，匹配键改为数据源内唯一；mark_inactive 按 ds_id 隔离 |
 | **性能** | 每次规则检查 `json.loads()` 解析 `role_list`/`dept_list` | 冗余字段避免 JOIN；小数组 JSON 解析开销极低。大规模部署可改用 JSONB 包含查询 |
 | **xpack 兼容性** | `DsRules` 模型在编译 .so 中，无法直接访问新字段 | 新增列可正常添加（ORM 忽略未知列）。读取 `role_list`/`dept_list` 可能需 `getattr()` 降级或原生列访问 |
@@ -857,3 +893,4 @@ def upgrade():
 3. **Excel 批量导入**：用户 Excel 导入模板是否支持角色/部门列？（建议支持，新增 `role_code` 和 `dept_code` 列）
 4. **审计日志**：角色/部门分配变更是否需要记录审计日志？（建议需要，复用 `@system_log` 装饰器）
 5. **xpack 模型访问**：`DsRules` 模型编译在 xpack 中，能否读取新增的 `role_list`/`dept_list`？如果不能，需使用 `getattr()` 降级或原生 SQL 列访问
+6. **同步数据的管理员编辑权限**：✅ 已决定 — 采用混合只读策略。外部管理的字段（name, email, dept_ids, role_ids, workspace）只读；SQLBot 本地字段（system_variables, password）可编辑。同步的角色和部门同样只读。详见 §8.6
