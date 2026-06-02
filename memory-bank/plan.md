@@ -1672,6 +1672,70 @@ WHERE d.ds_id = ds.id AND d.origin = 10 AND d.oid = 1;
 
 ### 步骤 7.13 规则可以获取到用户的角色和部门
 现在权限配置设置规则，当选择系统变量的时候只能选择账号、邮箱、姓名以及系统变量，不能选择角色和部门。角色和部门要可以选择。角色和部门是多值，关于应该为属于/不属于.
+
+### 步骤 7.14 整体测试
+#### 1 分角色测试
+网点管理员：看到所有数据
+```
+      工作日报的数量：SELECT COUNT(`d`.`id`) AS `daily_work_count`
+         FROM `psn_dailywork` `d`
+         LIMIT 1000
+```
+```
+按类型统计工作日报
+SELECT `d`.`service_type` AS `service_type`,
+       COUNT(`d`.`id`) AS `daily_work_count`
+FROM `psn_dailywork` `d`
+GROUP BY `d`.`service_type`
+ORDER BY `daily_work_count` DESC
+LIMIT 1000
+```   
+区域管理员：看到本区域的数据
+```
+fengtaiquadmin
+按服务类型统计工作日志数量
+
+SELECT `t1`.`service_type` AS `service_type`,
+       COUNT(`t1`.`id`) AS `work_log_count`
+FROM `psn_dailywork` `t1`
+WHERE ((`t1`.`area` LIKE '%000002%'))
+GROUP BY `t1`.`service_type`
+ORDER BY `work_log_count` DESC
+LIMIT 1000
+
+这里的缺点是每一个管理员需要设置区域属性
+
+```
+普通用户：看到自己创建修改的数据
+```
+company2023
+按服务类型统计工作日志数量
+
+SELECT `t1`.`service_type` AS `service_type`,
+       COUNT(`t1`.`id`) AS `work_log_count`
+FROM `psn_dailywork` `t1`
+WHERE (`t1`.`create_by` = 'company2023'
+       or `t1`.`update_by` = 'company2023')
+GROUP BY `t1`.`service_type`
+ORDER BY `work_log_count` DESC
+LIMIT 1000
+```
+其他用户：看不到一条数据
+```
+bayuegua
+按服务类型统计工作日志数量
+
+SELECT `t1`.`service_type` AS `service_type`,
+       COUNT(`t1`.`id`) AS `log_count`
+FROM `psn_dailywork` `t1`
+WHERE (`t1`.`id` = '1')
+GROUP BY `t1`.`service_type`
+ORDER BY `log_count` DESC
+LIMIT 1000
+```
+
+设置的规则是：要求限制的，精准定位；没有权限的不做限制，不配置规则
+
 ## 第八阶段：国际化与完善
 
 ### 步骤 8.1：补全中文翻译
