@@ -9,12 +9,14 @@ export const delPermissions = (id: any) => request.post(`/ds_permission/delete/$
 export interface RuleTargets {
   roles: (number | string)[]
   departments: (number | string)[]
+  users: (number | string)[]
 }
 
 export interface RuleTargetsResponse {
   rule_id: number | string
   roles: (number | string)[]
   departments: (number | string)[]
+  users: (number | string)[]
 }
 
 export const updateRuleTargets = (ruleId: number, data: RuleTargets) =>

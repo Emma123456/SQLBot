@@ -61,21 +61,20 @@ const selectPermissionRef = ref()
 const selectRoleRef = ref()
 const selectDeptRef = ref()
 const activeTargetTab = ref('user')
-const ruleTargetsMap = ref<Record<string, { roles: string[]; departments: string[] }>>({})
-// Computed: map from permission_id to aggregated roles/departments (for Card display)
+const ruleTargetsMap = ref<Record<string, { roles: string[]; departments: string[]; users: string[] }>>({})
+// Computed: map from ds_rules.id (permission group id) to roles/departments (for Card display)
+// Targets are stored at the ds_rules (group) level, not per ds_permission (rule) level.
 const permissionTargetsMap = computed(() => {
-  const map: Record<string, { roles: string[]; departments: string[] }> = {}
+  const map: Record<string, { roles: string[]; departments: string[]; users: string[] }> = {}
   for (const perm of ruleList.value) {
-    const roleSet = new Set<string>()
-    const deptSet = new Set<string>()
-    for (const rule of perm.permissions || []) {
-      const targets = ruleTargetsMap.value[String(rule.id)]
-      if (targets) {
-        targets.roles.forEach((r) => roleSet.add(String(r)))
-        targets.departments.forEach((d) => deptSet.add(String(d)))
-      }
+    // perm.id is ds_rules.id (permission group ID)
+    // ruleTargetsMap is keyed by ds_rules.id, so direct lookup is correct
+    const targets = ruleTargetsMap.value[String(perm.id)]
+    if (targets) {
+      map[String(perm.id)] = { roles: targets.roles, departments: targets.departments, users: targets.users }
+    } else {
+      map[String(perm.id)] = { roles: [], departments: [], users: [] }
     }
-    map[String(perm.id)] = { roles: [...roleSet], departments: [...deptSet] }
   }
   return map
 })
@@ -329,13 +328,14 @@ const handleSearch = () => {
   // Also load all rule targets for Card display
   getAllRuleTargets()
     .then((res: any) => {
-      const map: Record<string, { roles: string[]; departments: string[] }> = {}
+      const map: Record<string, { roles: string[]; departments: string[]; users: string[] }> = {}
       // API returns { rules: [...] } or array
       const rules = Array.isArray(res) ? res : (res?.rules || [])
       for (const item of rules) {
         map[String(item.rule_id)] = {
           roles: (item.roles || []).map((r: any) => String(r)),
           departments: (item.departments || []).map((d: any) => String(d)),
+          users: (item.users || []).map((u: any) => String(u)),
         }
       }
       ruleTargetsMap.value = map
@@ -407,19 +407,21 @@ const setUser = (row: any) => {
   isCreate.value = false
   Object.assign(currentPermission, cloneDeep(row))
   activeStep.value = 1
-  // Load rule targets aggregated from all rules in this permission group
-  const aggregated = permissionTargetsMap.value[String(row.id)]
-  if (aggregated) {
-    currentPermission.roles = aggregated.roles || []
-    currentPermission.departments = aggregated.departments || []
+  // Load rule targets directly from ds_rules (group level) via ruleTargetsMap
+  const targets = ruleTargetsMap.value[String(row.id)]
+  if (targets) {
+    currentPermission.roles = targets.roles || []
+    currentPermission.departments = targets.departments || []
+    currentPermission.users = targets.users || []
   } else {
     currentPermission.roles = []
     currentPermission.departments = []
+    currentPermission.users = []
   }
   ruleConfigvVisible.value = true
   nextTick(() => {
     activeTargetTab.value = 'user'
-    selectPermissionRef.value.open(row.users)
+    selectPermissionRef.value.open(currentPermission.users)
     selectRoleRef.value.open(currentPermission.roles)
     selectDeptRef.value.open(currentPermission.departments)
   })
@@ -557,15 +559,13 @@ const save = async () => {
   if (saveLoading.value) return
   saveLoading.value = true
   try {
-    await savePermissions(obj)
-    // Update rule targets (roles/departments) for EACH rule in the permission group
-    // The role_list/dept_list are stored on ds_rules, not ds_permission
-    const ruleIds = permissionsObj
-      .map((ele: any) => ele.id)
-      .filter((rid: any) => rid != null && String(rid) !== '' && String(rid) !== '0')
-    for (const ruleId of ruleIds) {
-      await updateRuleTargets(ruleId, { roles: selectedRoles, departments: selectedDepts })
-    }
+    const res = await savePermissions(obj)
+    // The xpack save API returns the ds_rules record with the real ID.
+    // For new groups, res.id is the newly created ds_rules.id.
+    // For existing groups, res.id equals the id we sent.
+    const realRuleId = res?.id || id
+    // Update targets at ds_rules (group) level — roles/departments are stored there.
+    await updateRuleTargets(realRuleId, { roles: selectedRoles, departments: selectedDepts, users: selectedUsers })
     ElMessage({
       type: 'success',
       message: t('common.save_success'),
@@ -656,7 +656,7 @@ const columnRules = {
             :id="ele.id"
             :key="ele.id"
             :name="ele.name"
-            :type="ele.users.length"
+            :type="permissionTargetsMap[String(ele.id)]?.users?.length || ele.users?.length || 0"
             :num="ele.permissions.length"
             :role-count="permissionTargetsMap[String(ele.id)]?.roles?.length || 0"
             :dept-count="permissionTargetsMap[String(ele.id)]?.departments?.length || 0"

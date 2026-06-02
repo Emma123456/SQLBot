@@ -1,7 +1,7 @@
-"""API endpoints for managing role_list and dept_list on ds_rules.
+"""API endpoints for managing role_list, dept_list, and user_list on ds_rules.
 
 Since DsRules is defined in the compiled xpack package and cannot be extended
-with new fields, these endpoints use raw SQL to read/write role_list and dept_list
+with new fields, these endpoints use raw SQL to read/write role_list, dept_list, and user_list
 on the ds_rules table.
 """
 
@@ -21,6 +21,7 @@ class RuleTargetsUpdate(BaseModel):
     """Request body for updating role and department targets of a rule."""
     roles: List[int] = []
     departments: List[int] = []
+    users: List[int] = []
 
 
 class RuleTargetsResponse(BaseModel):
@@ -28,6 +29,7 @@ class RuleTargetsResponse(BaseModel):
     rule_id: int
     roles: List[int] = []
     departments: List[int] = []
+    users: List[int] = []
 
 
 class AllRuleTargetsResponse(BaseModel):
@@ -52,20 +54,23 @@ async def update_rule_targets(
         {"id": rule_id}
     ).first()
     if not result:
-        raise HTTPException(status_code=404, detail="Rule not found")
+        # Rule doesn't exist yet (e.g., newly created rule not yet persisted to ds_rules)
+        # Skip silently - the targets will be set when the rule is actually created
+        return {"message": "Rule not found, targets update skipped", "rule_id": rule_id, "skipped": True}
 
-    # Update role_list and dept_list using raw SQL
+    # Update role_list, dept_list, and user_list using raw SQL
     session.execute(
-        text("UPDATE ds_rules SET role_list = :role_list, dept_list = :dept_list WHERE id = :id"),
+        text("UPDATE ds_rules SET role_list = :role_list, dept_list = :dept_list, user_list = :user_list WHERE id = :id"),
         {
             "role_list": json.dumps(dto.roles),
             "dept_list": json.dumps(dto.departments),
+            "user_list": json.dumps(dto.users),
             "id": rule_id,
         }
     )
     session.commit()
 
-    return {"message": "Rule targets updated successfully", "rule_id": rule_id}
+    return {"message": "Rule targets updated successfully", "rule_id": rule_id, "skipped": False}
 
 
 @router.get("/targets")
@@ -78,17 +83,19 @@ async def get_all_rule_targets(
         raise HTTPException(status_code=403, detail="Only admin can view rule targets")
 
     results = session.execute(
-        text("SELECT id, role_list, dept_list FROM ds_rules")
+        text("SELECT id, role_list, dept_list, user_list FROM ds_rules")
     ).all()
 
     rules = []
     for row in results:
         role_list = json.loads(row.role_list) if row.role_list else []
         dept_list = json.loads(row.dept_list) if row.dept_list else []
+        user_list = json.loads(row.user_list) if row.user_list else []
         rules.append(RuleTargetsResponse(
             rule_id=row.id,
             roles=role_list,
             departments=dept_list,
+            users=user_list,
         ))
 
     return AllRuleTargetsResponse(rules=rules)
@@ -105,7 +112,7 @@ async def get_rule_targets(
         raise HTTPException(status_code=403, detail="Only admin can view rule targets")
 
     result = session.execute(
-        text("SELECT id, role_list, dept_list FROM ds_rules WHERE id = :id"),
+        text("SELECT id, role_list, dept_list, user_list FROM ds_rules WHERE id = :id"),
         {"id": rule_id}
     ).first()
     if not result:
@@ -113,9 +120,11 @@ async def get_rule_targets(
 
     role_list = json.loads(result.role_list) if result.role_list else []
     dept_list = json.loads(result.dept_list) if result.dept_list else []
+    user_list = json.loads(result.user_list) if result.user_list else []
 
     return RuleTargetsResponse(
         rule_id=result.id,
         roles=role_list,
         departments=dept_list,
+        users=user_list,
     )

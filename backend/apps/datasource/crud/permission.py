@@ -11,28 +11,29 @@ from apps.datasource.models.datasource import CoreDatasource, CoreField, CoreTab
 from common.core.deps import CurrentUser, SessionDep
 
 
-def _load_rule_targets(session: SessionDep) -> Dict[int, Tuple[list, list]]:
-    """Load role_list and dept_list for all ds_rules via raw SQL.
+def _load_rule_targets(session: SessionDep) -> Dict[int, Tuple[list, list, list]]:
+    """Load role_list, dept_list and user_list for all ds_rules via raw SQL.
 
-    DsRules is a compiled xpack model that does not expose role_list/dept_list
+    DsRules is a compiled xpack model that does not expose role_list/dept_list/user_list
     as Python attributes. We must read them from the database directly.
 
     Returns:
-        Dict mapping rule_id -> (role_list, dept_list)
+        Dict mapping rule_id -> (role_list, dept_list, user_list)
     """
     results = session.execute(
-        text("SELECT id, role_list, dept_list FROM ds_rules")
+        text("SELECT id, role_list, dept_list, user_list FROM ds_rules")
     ).all()
-    targets: Dict[int, Tuple[list, list]] = {}
+    targets: Dict[int, Tuple[list, list, list]] = {}
     for row in results:
         r_list = json.loads(row.role_list) if row.role_list else []
         d_list = json.loads(row.dept_list) if row.dept_list else []
-        targets[row.id] = (r_list, d_list)
+        u_list = json.loads(row.user_list) if row.user_list else []
+        targets[row.id] = (r_list, d_list, u_list)
     return targets
 
 
 def match_rule(rule: DsRules, current_user: CurrentUser, permission_id: int,
-               rule_targets: Optional[Dict[int, Tuple[list, list]]] = None) -> bool:
+               rule_targets: Optional[Dict[int, Tuple[list, list, list]]] = None) -> bool:
     """Check if a rule matches the current user for a given permission.
 
     A rule matches when:
@@ -46,31 +47,34 @@ def match_rule(rule: DsRules, current_user: CurrentUser, permission_id: int,
     if p_list is None or permission_id not in p_list:
         return False
 
-    # Check user_list (backward compatible)
-    u_list = json.loads(rule.user_list) if rule.user_list else []
-    if u_list and (current_user.id in u_list or f'{current_user.id}' in u_list):
-        return True
-
-    # Check role_list and dept_list from raw SQL (xpack model has no these attrs)
+    # Pre-load user_list/role_list/dept_list via raw SQL (xpack model lacks these attrs)
     if rule_targets and rule.id in rule_targets:
-        r_list, d_list = rule_targets[rule.id]
+        r_list, d_list, u_list = rule_targets[rule.id]
     else:
         # Fallback: try getattr (won't work for xpack compiled models, but safe)
+        user_list_raw = getattr(rule, 'user_list', None)
+        u_list = json.loads(user_list_raw) if user_list_raw else []
         role_list_raw = getattr(rule, 'role_list', None)
         r_list = json.loads(role_list_raw) if role_list_raw else []
         dept_list_raw = getattr(rule, 'dept_list', None)
         d_list = json.loads(dept_list_raw) if dept_list_raw else []
 
-    # Check role_list
+    # Check user_list (int or string IDs for compatibility)
+    if u_list and (current_user.id in u_list or f'{current_user.id}' in u_list):
+        return True
+
+    # Check role_list (int or string IDs for compatibility)
     if r_list:
         user_role_ids = getattr(current_user, 'role_ids', None) or []
-        if any(rid in user_role_ids for rid in r_list):
+        user_role_strs = [f'{rid}' for rid in user_role_ids]
+        if any(rid in user_role_ids or f'{rid}' in user_role_strs for rid in r_list):
             return True
 
-    # Check dept_list
+    # Check dept_list (int or string IDs for compatibility)
     if d_list:
         user_dept_ids = getattr(current_user, 'dept_ids', None) or []
-        if any(did in user_dept_ids for did in d_list):
+        user_dept_strs = [f'{did}' for did in user_dept_ids]
+        if any(did in user_dept_ids or f'{did}' in user_dept_strs for did in d_list):
             return True
 
     return False

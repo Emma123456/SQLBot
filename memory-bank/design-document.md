@@ -14,13 +14,13 @@
 |------|------|
 | `system_variable` | 系统变量定义（内置3个：name/account/email；支持自定义；已扩展 value_type/match_mode） |
 | `ds_permission` | 单条行/列权限规则，含 `expression_tree`（JSON过滤树） |
-| `ds_rules` | 规则组，`permission_list` 关联多条权限，`user_list` 分配给多个用户（本设计扩展 `role_list`/`dept_list`） |
+| `ds_rules` | 规则组，`permission_list` 关联多条权限，`user_list`/`role_list`/`dept_list` 分配给多个用户/角色/部门（本设计扩展 `role_list`/`dept_list`，✅ 已完成） |
 | `sys_user` | 用户表，含 `system_variables` JSONB（变量绑定+扩展属性），本设计新增 `role_ids`/`dept_ids` |
 
 ### 行权限运行时流程
 
 1. 用户发起查询
-2. `permission.py:get_row_permission_filters()` 找出与当前用户匹配的权限规则（当前通过 `ds_rules.user_list` 匹配 `current_user.id`；本设计扩展为同时匹配 `role_list` 和 `dept_list`）
+2. `permission.py:get_row_permission_filters()` 找出与当前用户匹配的权限规则（✅ 已扩展：通过 `_load_rule_targets()` 原生 SQL 预加载，`match_rule()` 三维度匹配 `user_list` OR `role_list` OR `dept_list`）
 3. 每条规则的 `expression_tree` 由 `row_permission.py:transFilterTree()` 转换为 SQL WHERE 片段
 4. WHERE 片段注入最终查询
 
@@ -40,7 +40,9 @@
 | 文件 | 作用 |
 |------|------|
 | `backend/apps/datasource/crud/row_permission.py` | 核心：表达式树 → SQL WHERE（✅ 已扩展 user_attr/list/match_mode） |
-| `backend/apps/datasource/crud/permission.py` | 查询时拉取适用行权限（本设计需重构匹配逻辑） |
+| `backend/apps/datasource/crud/permission.py` | 查询时拉取适用行权限（✅ 已重构为原生 SQL 预加载 + 三维度匹配） |
+| `backend/apps/datasource/api/permission_rule.py` | 规则组目标 CRUD API（✅ 原生 SQL 读写 role_list/dept_list/user_list） |
+| `frontend/src/api/permissions.ts` | 前端规则组目标 API 接口定义（✅ 已扩展 users 字段） |
 | `backend/apps/system/models/system_variable_model.py` | SystemVariable 模型（✅ 已扩展 value_type/match_mode） |
 | `backend/apps/system/crud/system_variable.py` | 变量 CRUD |
 | `backend/apps/system/api/variable_api.py` | 变量 API |
@@ -49,7 +51,7 @@
 | `frontend/src/views/system/variables/index.vue` | 变量管理页面（✅ 已扩展 list/user_attr/match_mode） |
 | `frontend/src/views/system/permission/auth-tree/FilterFiled.vue` | 行权限过滤条件配置（✅ 已扩展 list 操作符锁定/user_attr 标签） |
 | `frontend/src/views/system/permission/auth-tree/RowAuth.vue` | 行权限表达式树编辑 |
-| `frontend/src/views/system/permission/index.vue` | 权限配置主页（本设计需扩展 Tab 选择） |
+| `frontend/src/views/system/permission/index.vue` | 权限配置主页（✅ 已扩展 Tab 选择 + 修复 ID 碰撞/临时 ID/组级目标） |
 | `frontend/src/views/system/permission/SelectPermission.vue` | 用户选择组件（现有） |
 | `frontend/src/views/system/permission/options.ts` | 操作符与系统参数枚举 |
 
@@ -234,6 +236,8 @@ SQLBot 的行权限系统通过 `ds_rules` 表将权限规则分配给用户，`
 | `dept_list` | Text (JSON) | `[]` | 部门 ID 数组，如 `[2, 5]` |
 
 > `user_list` 保留，向后兼容。一条规则可以同时指定用户、角色、部门的任意组合。
+>
+> ⚠️ **重要**：`role_list`、`dept_list`、`user_list` 在 `DsRules` xpack 编译模型中不可作为 Python 属性直接访问。后端通过 `_load_rule_targets()` 原生 SQL 预加载，前端通过独立的 `permission-rule/targets` API 读写。详见 §4.2 和 §5.4。
 
 #### `sys_user` — 新增冗余字段
 
@@ -256,27 +260,50 @@ if permission.id in p_list and current_user.id in u_list:
     flag = True
 ```
 
-### 4.2 新增逻辑
+### 4.2 实际实现逻辑（✅ 已完成）
+
+由于 `DsRules` 是编译的 xpack 模型，`role_list`/`dept_list`/`user_list` 无法作为 Python 属性直接访问，因此使用原生 SQL 预加载：
 
 ```python
-def match_rule(rule: DsRules, current_user: CurrentUser, permission_id: int) -> bool:
-    p_list = json.loads(rule.permission_list)
+def _load_rule_targets(session) -> Dict[int, Tuple[list, list, list]]:
+    """通过原生 SQL 加载 role_list、dept_list、user_list（xpack 模型不暴露这些属性）"""
+    results = session.execute(
+        text("SELECT id, role_list, dept_list, user_list FROM ds_rules")
+    ).all()
+    targets = {}
+    for row in results:
+        r_list = json.loads(row.role_list) if row.role_list else []
+        d_list = json.loads(row.dept_list) if row.dept_list else []
+        u_list = json.loads(row.user_list) if row.user_list else []
+        targets[row.id] = (r_list, d_list, u_list)
+    return targets
+
+def match_rule(rule, current_user, permission_id, rule_targets=None) -> bool:
+    p_list = json.loads(rule.permission_list) if rule.permission_list else []
     if p_list is None or permission_id not in p_list:
         return False
 
-    # 检查 user_list
-    u_list = json.loads(rule.user_list) if rule.user_list else []
-    if current_user.id in u_list or f'{current_user.id}' in u_list:
+    # 优先使用预加载的原始 SQL 数据，回退到 getattr()
+    if rule_targets and rule.id in rule_targets:
+        r_list, d_list, u_list = rule_targets[rule.id]
+    else:
+        user_list_raw = getattr(rule, 'user_list', None)
+        u_list = json.loads(user_list_raw) if user_list_raw else []
+        role_list_raw = getattr(rule, 'role_list', None)
+        r_list = json.loads(role_list_raw) if role_list_raw else []
+        dept_list_raw = getattr(rule, 'dept_list', None)
+        d_list = json.loads(dept_list_raw) if dept_list_raw else []
+
+    # 检查 user_list（支持 int 和 str ID）
+    if u_list and (current_user.id in u_list or f'{current_user.id}' in u_list):
         return True
 
     # 检查 role_list
-    r_list = json.loads(rule.role_list) if getattr(rule, 'role_list', None) else []
     if r_list and current_user.role_ids:
         if any(rid in current_user.role_ids for rid in r_list):
             return True
 
     # 检查 dept_list
-    d_list = json.loads(rule.dept_list) if getattr(rule, 'dept_list', None) else []
     if d_list and current_user.dept_ids:
         if any(did in current_user.dept_ids for did in d_list):
             return True
@@ -327,20 +354,44 @@ def match_rule(rule: DsRules, current_user: CurrentUser, permission_id: int) -> 
 | PUT | `/user/{id}/roles` | 设置用户的角色 | admin |
 | PUT | `/user/{id}/departments` | 设置用户的部门 | admin |
 
-### 5.4 权限规则 API 扩展（`/api/permission`）
+### 5.4 权限规则目标 API（`/api/permission-rule`）（✅ 已完成）
 
-现有 `savePermissions` 接口接受 `users: [id1, id2, ...]`，扩展为：
+由于 xpack 的 `/api/v1/ds_permission/save` 接口无法修改 `role_list`/`dept_list`/`user_list` 字段，需要单独的目标管理 API 通过原生 SQL 读写这些字段：
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| PUT | `/permission-rule/{rule_id}/targets` | 更新规则组的角色/部门/用户目标列表 | admin |
+| GET | `/permission-rule/targets` | 获取所有规则组的目标列表 | admin |
+| GET | `/permission-rule/{rule_id}/targets` | 获取单个规则组的目标列表 | admin |
+
+**请求体**：
 
 ```json
 {
-  "id": 1,
-  "name": "规则组名称",
-  "permissions": [...],
-  "users": [1, 5, 12],
   "roles": [3, 7],
-  "departments": [2, 5]
+  "departments": [2, 5],
+  "users": [1, 12]
 }
 ```
+
+**响应体**：
+
+```json
+{
+  "rules": [
+    { "rule_id": 1, "roles": [3, 7], "departments": [2], "users": [1] },
+    { "rule_id": 10, "roles": [], "departments": [], "users": [] }
+  ]
+}
+```
+
+**前端保存流程**（重要！xpack save 返回真实的 `ds_rules.id`）：
+
+1. 调用 `POST /api/v1/ds_permission/save` 创建/更新规则组 → 返回 `{code: 0, data: {id: 真实ds_rules.id, ...}}`
+2. 使用返回的 `data.id`（即真实 `ds_rules.id`），调用 `PUT /permission-rule/{真实id}/targets` 保存目标
+3. 刷新页面数据（重新加载 `list` + `targets`）
+
+> ⚠️ 原有 bug：前端使用临时 `+new Date()` 作为 ID 调用 `updateRuleTargets`，后端无法在数据库中找到临时 ID，导致目标从未保存。现已修复为使用 xpack save 响应的真实 ID。
 
 ### 5.5 外部数据库同步 API（`/api/sync`）
 
@@ -435,16 +486,27 @@ def refresh_user_dept_ids(session: Session, uid: int):
 
 **卡片展示**：规则组卡片显示计数 `3 用户, 2 角色, 1 部门`
 
+**保存流程**（✅ 已修复，原有 bug 修复）：
+
+1. 调用 xpack `POST /ds_permission/save` → 返回 `{code:0, data:{id: 真实ds_rules.id}}` → 前端自动解包为 `data` 对象
+2. 使用 `res.id || id`（真实 ds_rules.id），调用 `PUT /permission-rule/{真实id}/targets` 一次性保存角色/部门/用户目标
+3. 重新加载 list + targets 刷新页面
+
+**已修复的 3 个 bug**：
+
+| Bug | 原因 | 修复 |
+|-----|------|------|
+| ID 碰撞：ds_rules id=10 显示 "2 角色" | `permissionTargetsMap` 用 `ds_permission.id` 查找 `ruleTargetsMap`（键为 `ds_rules.id`），两个表的 id=7 碰撞 | 直接用 `perm.id`（即 `ds_rules.id`）查找 `ruleTargetsMap` |
+| 临时 ID：新规则目标无法保存 | 前端用 `+new Date()` 临时 ID 调用 `updateRuleTargets`，后端在数据库中找不到 | 使用 xpack save 响应的真实 `ds_rules.id` |
+| 规则级 vs 组级：目标应在组级存储 | 前端对每个 `ds_permission.id` 分别调用 `updateRuleTargets`，但目标存储在 `ds_rules` 组级 | 改为对 `ds_rules.id` 一次性调用 `updateRuleTargets` |
+
 **保存载荷**：
 
 ```json
 {
-  "id": 1,
-  "name": "华南区数据规则",
-  "permissions": [...],
-  "users": [1, 5],
   "roles": [3, 7],
-  "departments": [2]
+  "departments": [2],
+  "users": [1, 5]
 }
 ```
 
@@ -855,14 +917,18 @@ def upgrade():
 | `backend/apps/system/sync/scheduler.py` | **新建** | APScheduler 集成 |
 | `frontend/src/api/sync.ts` | **新建** | 同步 API 客户端 |
 | `frontend/src/views/system/sync/index.vue` | **新建** | 同步配置页面 |
-| `backend/apps/datasource/crud/permission.py` | 修改 | 按角色/部门匹配规则 |
+| `backend/apps/datasource/crud/permission.py` | 修改（✅ 已完成） | 原生 SQL 预加载 `role_list`/`dept_list`/`user_list` + `match_rule` 三维度匹配 |
+| `backend/apps/datasource/api/permission_rule.py` | 新建（✅ 已完成） | 规则组目标 CRUD API（原生 SQL 读写 `role_list`/`dept_list`/`user_list`） |
+| `frontend/src/api/permissions.ts` | 修改（✅ 已完成） | `RuleTargets`/`RuleTargetsResponse` 接口新增 `users` 字段 |
+| `frontend/src/views/system/permission/index.vue` | 修改（✅ 已完成） | 修复 ID 碰撞、临时 ID、组级目标；Tab 式目标选择 |
+| `frontend/src/views/system/permission/Card.vue` | 修改（✅ 已完成） | 展示用户/角色/部门计数 |
 | `backend/apps/api.py` | 修改 | 注册新路由 |
 | `frontend/src/views/system/role/index.vue` | **新建** | 角色管理页 |
 | `frontend/src/views/system/department/index.vue` | **新建** | 部门管理页 |
 | `frontend/src/views/system/permission/SelectRole.vue` | **新建** | 角色选择组件 |
 | `frontend/src/views/system/permission/SelectDepartment.vue` | **新建** | 部门树选择组件 |
-| `frontend/src/views/system/permission/index.vue` | 修改 | Tab 式目标选择 |
-| `frontend/src/views/system/permission/Card.vue` | 修改 | 展示角色/部门计数 |
+| `frontend/src/views/system/permission/index.vue` | 修改（✅ 已完成） | Tab 式目标选择；修复 ID 碰撞/临时 ID/组级目标 |
+| `frontend/src/views/system/permission/Card.vue` | 修改（✅ 已完成） | 展示角色/部门/用户计数 |
 | `frontend/src/views/system/user/User.vue` | 修改 | 新增角色/部门字段 |
 | `frontend/src/views/system/user/SyncUserDing.vue` | 修改 | 扩展角色/部门同步 |
 | `frontend/src/api/role.ts` | **新建** | 角色 API 客户端 |
@@ -882,7 +948,7 @@ def upgrade():
 | **管理员修改同步数据** | 管理员修改同步用户的部门/角色后，下次同步覆盖手动修改 | 混合只读策略：同步数据（origin=10）的外部管理字段管理员不可修改，消除冲突源头（§8.6） |
 | **多数据源 ID 冲突** | 不同外部数据库有相同主键值，导致数据覆盖或误删除 | 所有同步实体增加 `ds_id` 隔离，匹配键改为数据源内唯一；mark_inactive 按 ds_id 隔离 |
 | **性能** | 每次规则检查 `json.loads()` 解析 `role_list`/`dept_list` | 冗余字段避免 JOIN；小数组 JSON 解析开销极低。大规模部署可改用 JSONB 包含查询 |
-| **xpack 兼容性** | `DsRules` 模型在编译 .so 中，无法直接访问新字段 | 新增列可正常添加（ORM 忽略未知列）。读取 `role_list`/`dept_list` 可能需 `getattr()` 降级或原生列访问 |
+| **xpack 兼容性** | `DsRules` 模型在编译 .so 中，无法直接访问新字段 | ✅ 已解决 — 使用原生 SQL 预加载 `_load_rule_targets()`，回退 `getattr()` 降级。前端目标保存使用独立的 `permission-rule/targets` API，不依赖 xpack save |
 
 ---
 
@@ -892,5 +958,8 @@ def upgrade():
 2. **角色层级**：是否需要角色继承（如"超级管理员"继承"管理员"权限）？（建议 v1 不支持，扁平角色列表）
 3. **Excel 批量导入**：用户 Excel 导入模板是否支持角色/部门列？（建议支持，新增 `role_code` 和 `dept_code` 列）
 4. **审计日志**：角色/部门分配变更是否需要记录审计日志？（建议需要，复用 `@system_log` 装饰器）
-5. **xpack 模型访问**：`DsRules` 模型编译在 xpack 中，能否读取新增的 `role_list`/`dept_list`？如果不能，需使用 `getattr()` 降级或原生 SQL 列访问
+5. **xpack 模型访问**：✅ 已解决 — `DsRules` 编译在 xpack 中，`role_list`/`dept_list`/`user_list` 无法作为 Python 属性直接访问。解决方案：
+   - 后端：使用 `_load_rule_targets()` 原生 SQL 预加载，`match_rule` 优先使用预加载数据，回退 `getattr()`
+   - 前端：使用独立的 `permission-rule/targets` API 读写目标，不依赖 xpack 的 `ds_permission/save` 写入 `role_list`/`dept_list`/`user_list`
+   - ID 获取：xpack `save` API 返回真实的 `ds_rules.id`，前端用于后续 `updateRuleTargets` 调用
 6. **同步数据的管理员编辑权限**：✅ 已决定 — 采用混合只读策略。外部管理的字段（name, email, dept_ids, role_ids, workspace）只读；SQLBot 本地字段（system_variables, password）可编辑。同步的角色和部门同样只读。详见 §8.6
